@@ -1,0 +1,52 @@
+{
+    "name": "sunucode/afripay",
+    "description": "Unified payment gateway for Africa — Wave, Orange Money, PayDunya, PayTech, Stripe & PayPal for Laravel",
+    "keywords": ["laravel", "payment", "wave", "orange-money", "paydunya", "paytech", "stripe", "paypal", "africa", "mobile-money", "xof", "fcfa"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Sunu Code",
+            "email": "contact@sunucode.com",
+            "homepage": "https://sunucode.com"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/support": "^11.0|^12.0|^13.0",
+        "illuminate/database": "^11.0|^12.0|^13.0",
+        "illuminate/http": "^11.0|^12.0|^13.0",
+        "illuminate/events": "^11.0|^12.0|^13.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0|^10.0|^11.0",
+        "pestphp/pest": "^3.0|^4.0",
+        "mockery/mockery": "^1.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "SunuCode\\AfriPay\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "SunuCode\\AfriPay\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "SunuCode\\AfriPay\\AfriPayServiceProvider"
+            ],
+            "aliases": {
+                "AfriPay": "SunuCode\\AfriPay\\Facades\\AfriPay"
+            }
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    }
+}
