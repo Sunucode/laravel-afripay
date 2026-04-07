@@ -164,52 +164,84 @@ $payment = AfriPay::via('paydunya')->charge([
 
 #### Ecouter les evenements (le plus important)
 
-```php
-// app/Providers/EventServiceProvider.php
-// ou dans un Listener dedie
+> **Important :** Laravel auto-decouvre uniquement les listeners pour les events dans `App\Events\*`.
+> Les events d'un package vendor comme AfriPay (`SunuCode\AfriPay\Events\*`) ne sont **jamais auto-decouverts**.
+> Vous devez les enregistrer manuellement.
 
+Enregistrez vos listeners dans `AppServiceProvider::boot()` :
+
+```php
+// app/Providers/AppServiceProvider.php
+
+use Illuminate\Support\Facades\Event;
 use SunuCode\AfriPay\Events\PaymentCompleted;
 use SunuCode\AfriPay\Events\PaymentFailed;
 use SunuCode\AfriPay\Events\PaymentRefunded;
 
-class HandlePaymentCompleted
+public function boot(): void
 {
-    public function handle(PaymentCompleted $event): void
-    {
+    Event::listen(PaymentCompleted::class, function ($event) {
         $transaction = $event->transaction;
 
-        // Activer l'abonnement, envoyer un email, etc.
+        // Votre logique : crediter le wallet, activer un abonnement, envoyer un email...
         $subscription = $transaction->payable;
         $subscription->activate();
 
         // Acceder aux metadonnees
         $orderId = $transaction->metadata['order_id'] ?? null;
-    }
+    });
+
+    Event::listen(PaymentFailed::class, function ($event) {
+        // Notifier l'utilisateur, logger l'echec, etc.
+    });
+
+    Event::listen(PaymentRefunded::class, function ($event) {
+        // Annuler la commande, re-crediter, etc.
+    });
 }
 ```
 
-#### Verifier une transaction (fallback)
-
-Si le webhook n'est pas encore arrive quand l'utilisateur revient :
+Vous pouvez aussi utiliser des classes Listener dediees :
 
 ```php
-// Route de succes
-public function paymentSuccess(Request $request)
-{
-    $transaction = Transaction::where('reference', $request->reference)->first();
+Event::listen(PaymentCompleted::class, ActivateSubscription::class);
+Event::listen(PaymentFailed::class, NotifyPaymentFailure::class);
+```
 
-    if ($transaction->status->isPending()) {
-        // Verifier aupres de la passerelle ET dispatcher l'event si confirme
-        $transaction = AfriPay::verifyAndProcess($transaction);
-    }
+#### Gestion du retour (success URL)
+
+Quand l'utilisateur est redirige vers votre `success_url` apres le paiement, le webhook n'est pas forcement encore arrive. Vous **devez** appeler `verifyAndProcess()` dans votre controller de retour pour confirmer le paiement :
+
+```php
+// routes/web.php
+Route::get('/payment/success/{reference}', [PaymentController::class, 'success'])
+    ->name('payment.success');
+```
+
+```php
+// app/Http/Controllers/PaymentController.php
+
+use SunuCode\AfriPay\Facades\AfriPay;
+use SunuCode\AfriPay\Models\Transaction as AfriPayTransaction;
+
+public function success(string $reference)
+{
+    $transaction = AfriPayTransaction::where('reference', $reference)->firstOrFail();
+
+    // Verifie aupres de la passerelle ET dispatche PaymentCompleted si confirme
+    $transaction = AfriPay::verifyAndProcess($transaction);
 
     if ($transaction->status->isCompleted()) {
-        return view('payment.success');
+        return view('payment.success', compact('transaction'));
     }
 
-    return view('payment.pending');
+    // Le paiement n'est pas encore confirme (webhook en attente)
+    return view('payment.pending', compact('transaction'));
 }
 ```
+
+> **Sans cet appel**, si le webhook arrive en retard (ou jamais en dev local),
+> l'utilisateur verra une page de succes mais votre logique metier ne sera jamais executee.
 
 #### Rembourser
 
@@ -244,6 +276,13 @@ AFRIPAY_TRUST_WEBHOOK_ONLY=false
 Quand `trust_webhook_only=true`, `verifyAndProcess()` verifie le statut aupres de la passerelle mais ne dispatche **aucun evenement**. Seul le webhook declenche `PaymentCompleted`. C'est plus sur car ca empeche un utilisateur de forger une URL de succes.
 
 Quand `trust_webhook_only=false`, les deux chemins (webhook ET URL de retour) peuvent declencher les evenements. Utile en dev local quand les webhooks ne peuvent pas atteindre votre machine.
+
+> **Piege courant en developpement :** Si vous developpez en local sans tunnel (ngrok, Expose...),
+> les webhooks ne peuvent pas atteindre votre machine. Avec `AFRIPAY_TRUST_WEBHOOK_ONLY=true` (defaut),
+> `verifyAndProcess()` ne declenchera **aucun event** et vos paiements resteront en `pending`.
+>
+> **Solution :** Mettez `AFRIPAY_TRUST_WEBHOOK_ONLY=false` dans votre `.env` local.
+> N'oubliez pas de remettre `true` en production.
 
 #### Ajouter une passerelle personnalisee
 
@@ -331,21 +370,68 @@ php artisan migrate
 
 ### Listening to Events
 
-This is the primary way to react to payment outcomes:
+> **Important:** Laravel only auto-discovers listeners for events in `App\Events\*`.
+> Events from a vendor package like AfriPay (`SunuCode\AfriPay\Events\*`) are **never auto-discovered**.
+> You must register them manually.
+
+Register your listeners in `AppServiceProvider::boot()`:
 
 ```php
-use SunuCode\AfriPay\Events\PaymentCompleted;
+// app/Providers/AppServiceProvider.php
 
-class ActivateSubscription
+use Illuminate\Support\Facades\Event;
+use SunuCode\AfriPay\Events\PaymentCompleted;
+use SunuCode\AfriPay\Events\PaymentFailed;
+
+public function boot(): void
 {
-    public function handle(PaymentCompleted $event): void
-    {
+    Event::listen(PaymentCompleted::class, function ($event) {
         $transaction = $event->transaction;
         $subscription = $transaction->payable;
         $subscription->activate();
-    }
+    });
+
+    Event::listen(PaymentFailed::class, function ($event) {
+        // Notify user, log failure, etc.
+    });
 }
 ```
+
+You can also use dedicated Listener classes:
+
+```php
+Event::listen(PaymentCompleted::class, ActivateSubscription::class);
+```
+
+### Handling the Success URL
+
+When the user is redirected to your `success_url`, the webhook may not have arrived yet. You **must** call `verifyAndProcess()` in your return controller:
+
+```php
+use SunuCode\AfriPay\Facades\AfriPay;
+use SunuCode\AfriPay\Models\Transaction as AfriPayTransaction;
+
+public function success(string $reference)
+{
+    $transaction = AfriPayTransaction::where('reference', $reference)->firstOrFail();
+    $transaction = AfriPay::verifyAndProcess($transaction);
+
+    if ($transaction->status->isCompleted()) {
+        return view('payment.success', compact('transaction'));
+    }
+
+    return view('payment.pending', compact('transaction'));
+}
+```
+
+### AFRIPAY_TRUST_WEBHOOK_ONLY
+
+> **Common pitfall in development:** Without a tunnel (ngrok, Expose...), webhooks can't reach
+> your local machine. With `AFRIPAY_TRUST_WEBHOOK_ONLY=true` (default), `verifyAndProcess()` will
+> **not dispatch any events** and your payments will stay `pending`.
+>
+> **Fix:** Set `AFRIPAY_TRUST_WEBHOOK_ONLY=false` in your local `.env`.
+> Remember to set it back to `true` in production.
 
 ### Custom Gateways
 
