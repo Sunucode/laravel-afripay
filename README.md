@@ -172,13 +172,33 @@ return redirect($payment['redirect_url']);
 
 #### Lier a un modele (polymorphic)
 
+Passez `payable_type` et `payable_id` pour lier la transaction a n'importe quel modele de votre application. C'est ce lien qui permet de router la logique metier dans vos listeners (voir section suivante).
+
 ```php
-$payment = AfriPay::via('paydunya')->charge([
+// Abonnement
+$payment = AfriPay::via('wave')->charge([
     'amount'        => 9900,
-    'success_url'   => route('subscription.success'),
-    'error_url'     => route('subscription.error'),
+    'success_url'   => route('payment.success'),
+    'error_url'     => route('payment.error'),
     'payable_type'  => Subscription::class,
     'payable_id'    => $subscription->id,
+]);
+
+// Commande e-commerce
+$payment = AfriPay::via('paydunya')->charge([
+    'amount'        => 25000,
+    'success_url'   => route('payment.success'),
+    'error_url'     => route('payment.error'),
+    'payable_type'  => Order::class,
+    'payable_id'    => $order->id,
+]);
+
+// Recharge de wallet (sans modele lie)
+$payment = AfriPay::via('orange_money')->charge([
+    'amount'        => 5000,
+    'success_url'   => route('payment.success'),
+    'error_url'     => route('payment.error'),
+    'metadata'      => ['user_id' => auth()->id(), 'type' => 'wallet_topup'],
 ]);
 ```
 
@@ -188,7 +208,20 @@ $payment = AfriPay::via('paydunya')->charge([
 > Les events d'un package vendor comme AfriPay (`SunuCode\AfriPay\Events\*`) ne sont **jamais auto-decouverts**.
 > Vous devez les enregistrer manuellement.
 
-Si vous avez utilise `php artisan afripay:install`, les listeners sont deja enregistres avec des `// TODO` a completer. Sinon, ajoutez-les dans `AppServiceProvider::boot()` :
+Si vous avez utilise `php artisan afripay:install`, les listeners sont deja enregistres avec des `// TODO` a completer. Sinon, ajoutez-les dans `AppServiceProvider::boot()`.
+
+**Cas simple** — une seule logique de paiement :
+
+```php
+Event::listen(PaymentCompleted::class, function ($event) {
+    $order = $event->transaction->payable;
+    $order->markAsPaid();
+});
+```
+
+**Cas courant** — plusieurs logiques (abonnement, commande, recharge...) :
+
+Le `payable_type` que vous passez au `charge()` permet de router automatiquement vers la bonne logique. Utilisez `match()` sur le type polymorphique :
 
 ```php
 // app/Providers/AppServiceProvider.php
@@ -202,26 +235,38 @@ public function boot(): void
 {
     Event::listen(PaymentCompleted::class, function ($event) {
         $transaction = $event->transaction;
+        $payable = $transaction->payable; // Le modele lie (Order, Subscription...)
 
-        // Votre logique metier ici
-        // Exemples : crediter un wallet, activer un abonnement, envoyer un email...
+        match ($transaction->payable_type) {
+            \App\Models\Subscription::class => $payable->activate(),
+            \App\Models\Order::class        => $payable->markAsPaid(),
+            default                         => $this->handleGenericPayment($transaction),
+        };
     });
 
     Event::listen(PaymentFailed::class, function ($event) {
-        // Notifier l'utilisateur, logger l'echec, etc.
+        $transaction = $event->transaction;
+
+        match ($transaction->payable_type) {
+            \App\Models\Order::class => $transaction->payable->cancel(),
+            default                  => null,
+        };
+
+        // Notifier l'utilisateur dans tous les cas
+        // Notification::send($transaction->payable?->user, new PaymentFailedNotification($transaction));
     });
 
     Event::listen(PaymentRefunded::class, function ($event) {
-        // Annuler la commande, re-crediter, etc.
+        // $event->reason contient le motif du remboursement
     });
 }
 ```
 
-Vous pouvez aussi utiliser des classes Listener dediees :
+**Avec des classes Listener dediees** (recommande pour les gros projets) :
 
 ```php
-Event::listen(PaymentCompleted::class, ActivateSubscription::class);
-Event::listen(PaymentFailed::class, NotifyPaymentFailure::class);
+Event::listen(PaymentCompleted::class, HandleCompletedPayment::class);
+Event::listen(PaymentFailed::class, HandleFailedPayment::class);
 ```
 
 #### Gestion du retour (success URL)
@@ -394,11 +439,11 @@ Or set up manually: `php artisan vendor:publish --tag=afripay-config` and follow
 > Events from a vendor package like AfriPay (`SunuCode\AfriPay\Events\*`) are **never auto-discovered**.
 > You must register them manually.
 
-Register your listeners in `AppServiceProvider::boot()`:
+If you used `php artisan afripay:install`, listeners are already registered with `// TODO` placeholders. Otherwise, add them in `AppServiceProvider::boot()`.
+
+Use the `payable_type` set during `charge()` to route to the right business logic:
 
 ```php
-// app/Providers/AppServiceProvider.php
-
 use Illuminate\Support\Facades\Event;
 use SunuCode\AfriPay\Events\PaymentCompleted;
 use SunuCode\AfriPay\Events\PaymentFailed;
@@ -407,20 +452,19 @@ public function boot(): void
 {
     Event::listen(PaymentCompleted::class, function ($event) {
         $transaction = $event->transaction;
-        $subscription = $transaction->payable;
-        $subscription->activate();
+        $payable = $transaction->payable;
+
+        match ($transaction->payable_type) {
+            \App\Models\Subscription::class => $payable->activate(),
+            \App\Models\Order::class        => $payable->markAsPaid(),
+            default                         => null,
+        };
     });
 
     Event::listen(PaymentFailed::class, function ($event) {
         // Notify user, log failure, etc.
     });
 }
-```
-
-You can also use dedicated Listener classes:
-
-```php
-Event::listen(PaymentCompleted::class, ActivateSubscription::class);
 ```
 
 ### Handling the Success URL

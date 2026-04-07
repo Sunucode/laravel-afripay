@@ -152,9 +152,17 @@ PHP;
         $listenerCode = <<<'PHP'
 
         // AfriPay event listeners
+        // The payable_type set during charge() lets you route to the right logic.
         Event::listen(PaymentCompleted::class, function ($event) {
             $transaction = $event->transaction;
-            // TODO: your logic — activate subscription, send email, credit wallet...
+            $payable = $transaction->payable;
+
+            // TODO: add your payable_type cases here
+            match ($transaction->payable_type) {
+                // \App\Models\Subscription::class => $payable->activate(),
+                // \App\Models\Order::class        => $payable->markAsPaid(),
+                default => null,
+            };
         });
 
         Event::listen(PaymentFailed::class, function ($event) {
