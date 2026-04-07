@@ -7,7 +7,8 @@ use Illuminate\Support\Str;
 
 class InstallCommand extends Command
 {
-    protected $signature = 'afripay:install';
+    protected $signature = 'afripay:install
+        {--controller-path=Http/Controllers : Controller directory relative to app/}';
 
     protected $description = 'Scaffold AfriPay controller, event listeners, routes, and views';
 
@@ -16,10 +17,12 @@ class InstallCommand extends Command
         $this->info('Installing AfriPay...');
         $this->newLine();
 
+        $controllerPath = trim($this->option('controller-path'), '/');
+
         $this->publishConfig();
-        $this->publishController();
+        $this->publishController($controllerPath);
         $this->publishViews();
-        $this->registerRoutes();
+        $this->registerRoutes($controllerPath);
         $this->registerListeners();
 
         $this->newLine();
@@ -29,6 +32,7 @@ class InstallCommand extends Command
         $this->line('  1. Add your gateway credentials to <comment>.env</comment>');
         $this->line('  2. Run <comment>php artisan migrate</comment>');
         $this->line('  3. Fill in your business logic in <comment>app/Providers/AppServiceProvider.php</comment>');
+        $this->line('  4. Customize the views in <comment>resources/views/payment/</comment> to match your layout');
         $this->newLine();
 
         return self::SUCCESS;
@@ -44,18 +48,25 @@ class InstallCommand extends Command
         }
     }
 
-    protected function publishController(): void
+    protected function publishController(string $controllerPath): void
     {
-        $target = app_path('Http/Controllers/AfriPayController.php');
+        $relativePath = $controllerPath.'/AfriPayController.php';
+        $target = app_path($relativePath);
 
         if (file_exists($target)) {
-            $this->components->info('Controller [app/Http/Controllers/AfriPayController.php] already exists — skipping.');
+            $this->components->info("Controller [app/{$relativePath}] already exists — skipping.");
             return;
         }
 
         $this->ensureDirectoryExists(dirname($target));
-        copy(__DIR__.'/../../stubs/afripay-controller.stub', $target);
-        $this->components->info('Controller [app/Http/Controllers/AfriPayController.php] created.');
+
+        // Read the stub and adjust the namespace
+        $stub = file_get_contents(__DIR__.'/../../stubs/afripay-controller.stub');
+        $namespace = 'App\\'.str_replace('/', '\\', $controllerPath);
+        $stub = str_replace('namespace App\\Http\\Controllers;', "namespace {$namespace};", $stub);
+
+        file_put_contents($target, $stub);
+        $this->components->info("Controller [app/{$relativePath}] created.");
     }
 
     protected function publishViews(): void
@@ -82,7 +93,7 @@ class InstallCommand extends Command
         }
     }
 
-    protected function registerRoutes(): void
+    protected function registerRoutes(string $controllerPath): void
     {
         $routesFile = base_path('routes/web.php');
 
@@ -98,11 +109,13 @@ class InstallCommand extends Command
             return;
         }
 
-        $routes = <<<'PHP'
+        $namespace = 'App\\'.str_replace('/', '\\', $controllerPath);
+
+        $routes = <<<PHP
 
 
 // AfriPay payment routes
-use App\Http\Controllers\AfriPayController;
+use {$namespace}\\AfriPayController;
 
 Route::get('/payment/success/{reference}', [AfriPayController::class, 'success'])->name('payment.success');
 Route::get('/payment/error/{reference}', [AfriPayController::class, 'error'])->name('payment.error');
@@ -141,18 +154,18 @@ PHP;
         // AfriPay event listeners
         Event::listen(PaymentCompleted::class, function ($event) {
             $transaction = $event->transaction;
-            // TODO: Votre logique — crediter le wallet, activer un abonnement, envoyer un email...
+            // TODO: your logic — activate subscription, send email, credit wallet...
         });
 
         Event::listen(PaymentFailed::class, function ($event) {
             $transaction = $event->transaction;
-            // TODO: Notifier l'utilisateur, logger l'echec...
+            // TODO: notify user, log failure...
         });
 
         Event::listen(PaymentRefunded::class, function ($event) {
             $transaction = $event->transaction;
             $reason = $event->reason;
-            // TODO: Annuler la commande, re-crediter...
+            // TODO: cancel order, issue credit...
         });
 PHP;
 
@@ -170,7 +183,6 @@ PHP;
     {
         // Find the last "use" import line before the class declaration
         if (preg_match('/^(use\s+.+;)\s*$/m', $contents, $matches, PREG_OFFSET_CAPTURE)) {
-            // Find the position of the last "use" statement
             preg_match_all('/^use\s+.+;\s*$/m', $contents, $allMatches, PREG_OFFSET_CAPTURE);
             $lastUse = end($allMatches[0]);
             $insertPos = $lastUse[1] + strlen($lastUse[0]);

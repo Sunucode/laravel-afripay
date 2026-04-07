@@ -1,8 +1,17 @@
-<x-app-layout>
-    <div style="max-width: 480px; margin: 80px auto; text-align: center;">
+{{-- Personnalisez cette vue ou integrez-la dans votre layout --}}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paiement confirme</title>
+</head>
+<body>
+    <div style="max-width: 480px; margin: 80px auto; text-align: center; font-family: sans-serif;">
         <h1>Paiement confirme</h1>
         <p>Montant : {{ number_format($transaction->amount, 0, ',', ' ') }} {{ $transaction->currency }}</p>
         <p>Reference : {{ $transaction->reference }}</p>
         <a href="{{ url('/') }}">Retour a l'accueil</a>
     </div>
-</x-app-layout>
+</body>
+</html>

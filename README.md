@@ -62,28 +62,28 @@ composer require sunucode/afripay
 
 #### Installation rapide (recommande)
 
-Une seule commande pour tout scaffolder :
+Une seule commande genere tout le necessaire :
 
 ```bash
 php artisan afripay:install
-```
-
-Cette commande va :
-- Publier le fichier de configuration `config/afripay.php`
-- Creer `AfriPayController` avec les methodes `success` et `error`
-- Creer les vues `payment/success`, `payment/pending` et `payment/error`
-- Ajouter les routes dans `routes/web.php`
-- Enregistrer les event listeners dans `AppServiceProvider`
-
-Il ne reste qu'a ajouter vos cles dans `.env` et lancer les migrations :
-
-```bash
 php artisan migrate
 ```
 
-#### Installation manuelle
+La commande cree :
+- `config/afripay.php` — configuration des passerelles
+- `app/Http/Controllers/AfriPayController.php` — controller avec `success()` et `error()`
+- `resources/views/payment/{success,pending,error}.blade.php` — vues de retour (HTML simple, a integrer dans votre layout)
+- Les routes `/payment/success/{reference}` et `/payment/error/{reference}` dans `routes/web.php`
+- Les event listeners dans `AppServiceProvider::boot()`
 
-Si vous preferez tout configurer vous-meme :
+Par defaut, le controller est cree dans `app/Http/Controllers/`. Pour le placer ailleurs :
+
+```bash
+# Exemple : app/Http/Controllers/Payment/AfriPayController.php
+php artisan afripay:install --controller-path=Http/Controllers/Payment
+```
+
+#### Installation manuelle
 
 ```bash
 php artisan vendor:publish --tag=afripay-config
@@ -188,7 +188,7 @@ $payment = AfriPay::via('paydunya')->charge([
 > Les events d'un package vendor comme AfriPay (`SunuCode\AfriPay\Events\*`) ne sont **jamais auto-decouverts**.
 > Vous devez les enregistrer manuellement.
 
-Enregistrez vos listeners dans `AppServiceProvider::boot()` :
+Si vous avez utilise `php artisan afripay:install`, les listeners sont deja enregistres avec des `// TODO` a completer. Sinon, ajoutez-les dans `AppServiceProvider::boot()` :
 
 ```php
 // app/Providers/AppServiceProvider.php
@@ -203,12 +203,8 @@ public function boot(): void
     Event::listen(PaymentCompleted::class, function ($event) {
         $transaction = $event->transaction;
 
-        // Votre logique : crediter le wallet, activer un abonnement, envoyer un email...
-        $subscription = $transaction->payable;
-        $subscription->activate();
-
-        // Acceder aux metadonnees
-        $orderId = $transaction->metadata['order_id'] ?? null;
+        // Votre logique metier ici
+        // Exemples : crediter un wallet, activer un abonnement, envoyer un email...
     });
 
     Event::listen(PaymentFailed::class, function ($event) {
@@ -232,15 +228,9 @@ Event::listen(PaymentFailed::class, NotifyPaymentFailure::class);
 
 Quand l'utilisateur est redirige vers votre `success_url` apres le paiement, le webhook n'est pas forcement encore arrive. Vous **devez** appeler `verifyAndProcess()` dans votre controller de retour pour confirmer le paiement :
 
-```php
-// routes/web.php
-Route::get('/payment/success/{reference}', [PaymentController::class, 'success'])
-    ->name('payment.success');
-```
+Si vous avez utilise `php artisan afripay:install`, le controller est deja genere avec cette logique. Sinon, voici le code a ajouter dans votre controller de retour :
 
 ```php
-// app/Http/Controllers/PaymentController.php
-
 use SunuCode\AfriPay\Facades\AfriPay;
 use SunuCode\AfriPay\Models\Transaction as AfriPayTransaction;
 
@@ -387,12 +377,16 @@ composer require sunucode/afripay
 
 # Quick setup (recommended) — scaffolds controller, views, routes, and listeners
 php artisan afripay:install
-
-# Then run migrations
 php artisan migrate
 ```
 
-Or manually: `php artisan vendor:publish --tag=afripay-config` and follow the sections below.
+To place the controller in a custom directory:
+
+```bash
+php artisan afripay:install --controller-path=Http/Controllers/Payment
+```
+
+Or set up manually: `php artisan vendor:publish --tag=afripay-config` and follow the sections below.
 
 ### Listening to Events
 

@@ -1,9 +1,18 @@
-<x-app-layout>
-    <div style="max-width: 480px; margin: 80px auto; text-align: center;">
+{{-- Personnalisez cette vue ou integrez-la dans votre layout --}}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paiement en attente</title>
+</head>
+<body>
+    <div style="max-width: 480px; margin: 80px auto; text-align: center; font-family: sans-serif;">
         <h1>Paiement en attente</h1>
         <p>Votre paiement est en cours de verification.</p>
         <p>Reference : {{ $transaction->reference }}</p>
         <p>Vous recevrez une confirmation des que le paiement sera valide.</p>
         <a href="{{ url('/') }}">Retour a l'accueil</a>
     </div>
-</x-app-layout>
+</body>
+</html>
