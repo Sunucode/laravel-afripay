@@ -60,17 +60,37 @@ AfriPay::via('orange_money')->charge([...]);
 composer require sunucode/afripay
 ```
 
-Publier la configuration :
+#### Installation rapide (recommande)
+
+Une seule commande pour tout scaffolder :
 
 ```bash
-php artisan vendor:publish --tag=afripay-config
+php artisan afripay:install
 ```
 
-Lancer les migrations :
+Cette commande va :
+- Publier le fichier de configuration `config/afripay.php`
+- Creer `AfriPayController` avec les methodes `success` et `error`
+- Creer les vues `payment/success`, `payment/pending` et `payment/error`
+- Ajouter les routes dans `routes/web.php`
+- Enregistrer les event listeners dans `AppServiceProvider`
+
+Il ne reste qu'a ajouter vos cles dans `.env` et lancer les migrations :
 
 ```bash
 php artisan migrate
 ```
+
+#### Installation manuelle
+
+Si vous preferez tout configurer vous-meme :
+
+```bash
+php artisan vendor:publish --tag=afripay-config
+php artisan migrate
+```
+
+Puis suivez les sections [Ecouter les evenements](#ecouter-les-evenements-le-plus-important) et [Gestion du retour](#gestion-du-retour-success-url) ci-dessous.
 
 ### Configuration
 
@@ -364,9 +384,15 @@ return redirect($payment['redirect_url']);
 
 ```bash
 composer require sunucode/afripay
-php artisan vendor:publish --tag=afripay-config
+
+# Quick setup (recommended) — scaffolds controller, views, routes, and listeners
+php artisan afripay:install
+
+# Then run migrations
 php artisan migrate
 ```
+
+Or manually: `php artisan vendor:publish --tag=afripay-config` and follow the sections below.
 
 ### Listening to Events
 

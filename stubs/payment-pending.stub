@@ -1,0 +1,9 @@
+<x-app-layout>
+    <div style="max-width: 480px; margin: 80px auto; text-align: center;">
+        <h1>Paiement en attente</h1>
+        <p>Votre paiement est en cours de verification.</p>
+        <p>Reference : {{ $transaction->reference }}</p>
+        <p>Vous recevrez une confirmation des que le paiement sera valide.</p>
+        <a href="{{ url('/') }}">Retour a l'accueil</a>
+    </div>
+</x-app-layout>

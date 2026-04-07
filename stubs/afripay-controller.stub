@@ -1,0 +1,37 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use SunuCode\AfriPay\Facades\AfriPay;
+use SunuCode\AfriPay\Models\Transaction as AfriPayTransaction;
+
+class AfriPayController extends Controller
+{
+    /**
+     * L'utilisateur revient apres un paiement reussi.
+     * On appelle verifyAndProcess() pour confirmer le paiement
+     * au cas ou le webhook n'est pas encore arrive.
+     */
+    public function success(string $reference)
+    {
+        $transaction = AfriPayTransaction::where('reference', $reference)->firstOrFail();
+        $transaction = AfriPay::verifyAndProcess($transaction);
+
+        if ($transaction->status->isCompleted()) {
+            return view('payment.success', compact('transaction'));
+        }
+
+        return view('payment.pending', compact('transaction'));
+    }
+
+    /**
+     * L'utilisateur revient apres un paiement echoue ou annule.
+     */
+    public function error(string $reference)
+    {
+        $transaction = AfriPayTransaction::where('reference', $reference)->firstOrFail();
+
+        return view('payment.error', compact('transaction'));
+    }
+}

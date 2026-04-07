@@ -3,6 +3,7 @@
 namespace SunuCode\AfriPay;
 
 use Illuminate\Support\ServiceProvider;
+use SunuCode\AfriPay\Console\InstallCommand;
 use SunuCode\AfriPay\Http\Middleware\VerifyWebhookSignature;
 
 class AfriPayServiceProvider extends ServiceProvider
@@ -38,5 +39,12 @@ class AfriPayServiceProvider extends ServiceProvider
 
         // Register middleware alias
         $this->app['router']->aliasMiddleware('afripay.signature', VerifyWebhookSignature::class);
+
+        // Register commands
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                InstallCommand::class,
+            ]);
+        }
     }
 }
