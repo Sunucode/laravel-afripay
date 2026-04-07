@@ -9,9 +9,9 @@ use SunuCode\AfriPay\Models\Transaction as AfriPayTransaction;
 class AfriPayController extends Controller
 {
     /**
-     * L'utilisateur revient apres un paiement reussi.
+     * L'utilisateur revient après un paiement réussi.
      * On appelle verifyAndProcess() pour confirmer le paiement
-     * au cas ou le webhook n'est pas encore arrive.
+     * au cas où le webhook n'est pas encore arrivé.
      */
     public function success(string $reference)
     {
@@ -26,7 +26,7 @@ class AfriPayController extends Controller
     }
 
     /**
-     * L'utilisateur revient apres un paiement echoue ou annule.
+     * L'utilisateur revient après un paiement échoué ou annulé.
      */
     public function error(string $reference)
     {

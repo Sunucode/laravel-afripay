@@ -1,4 +1,4 @@
-{{-- Personnalisez cette vue ou integrez-la dans votre layout --}}
+{{-- Personnalisez cette vue ou intégrez-la dans votre layout --}}
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -9,10 +9,10 @@
 <body>
     <div style="max-width: 480px; margin: 80px auto; text-align: center; font-family: sans-serif;">
         <h1>Paiement en attente</h1>
-        <p>Votre paiement est en cours de verification.</p>
+        <p>Votre paiement est en cours de vérification.</p>
         <p>Reference : {{ $transaction->reference }}</p>
-        <p>Vous recevrez une confirmation des que le paiement sera valide.</p>
-        <a href="{{ url('/') }}">Retour a l'accueil</a>
+        <p>Vous recevrez une confirmation dès que le paiement sera validé.</p>
+        <a href="{{ url('/') }}">Retour à l'accueil</a>
     </div>
 </body>
 </html>

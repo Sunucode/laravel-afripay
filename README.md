@@ -9,16 +9,16 @@
 
 ---
 
-[Francais](#francais) | [English](#english)
+[Français](#francais) | [English](#english)
 
 ---
 
 <a name="francais"></a>
-## Francais
+## Français
 
 ### Pourquoi AfriPay ?
 
-Les developpeurs en Afrique de l'Ouest integrent manuellement chaque passerelle de paiement dans chaque projet. Wave, Orange Money, PayDunya, PayTech... chacun avec son API, ses webhooks, ses signatures.
+Les développeurs en Afrique de l'Ouest intègrent manuellement chaque passerelle de paiement dans chaque projet. Wave, Orange Money, PayDunya, PayTech... chacun avec son API, ses webhooks, ses signatures.
 
 **AfriPay unifie tout ca en une seule interface :**
 
@@ -43,7 +43,7 @@ AfriPay::via('paydunya')->charge([...]);
 AfriPay::via('orange_money')->charge([...]);
 ```
 
-### Passerelles supportees
+### Passerelles supportées
 
 | Passerelle | Pays | Type | Statut |
 |------------|------|------|--------|
@@ -60,23 +60,23 @@ AfriPay::via('orange_money')->charge([...]);
 composer require sunucode/afripay
 ```
 
-#### Installation rapide (recommande)
+#### Installation rapide (recommandé)
 
-Une seule commande genere tout le necessaire :
+Une seule commande génère tout le nécessaire :
 
 ```bash
 php artisan afripay:install
 php artisan migrate
 ```
 
-La commande cree :
+La commande crée :
 - `config/afripay.php` — configuration des passerelles
 - `app/Http/Controllers/AfriPayController.php` — controller avec `success()` et `error()`
-- `resources/views/payment/{success,pending,error}.blade.php` — vues de retour (HTML simple, a integrer dans votre layout)
+- `resources/views/payment/{success,pending,error}.blade.php` — vues de retour (HTML simple, à intégrer dans votre layout)
 - Les routes `/payment/success/{reference}` et `/payment/error/{reference}` dans `routes/web.php`
 - Les event listeners dans `AppServiceProvider::boot()`
 
-Par defaut, le controller est cree dans `app/Http/Controllers/`. Pour le placer ailleurs :
+Par défaut, le controller est créé dans `app/Http/Controllers/`. Pour le placer ailleurs :
 
 ```bash
 # Exemple : app/Http/Controllers/Payment/AfriPayController.php
@@ -90,22 +90,22 @@ php artisan vendor:publish --tag=afripay-config
 php artisan migrate
 ```
 
-Puis suivez les sections [Ecouter les evenements](#ecouter-les-evenements-le-plus-important) et [Gestion du retour](#gestion-du-retour-success-url) ci-dessous.
+Puis suivez les sections [Écouter les événements](#écouter-les-événements-le-plus-important) et [Gestion du retour](#gestion-du-retour-success-url) ci-dessous.
 
 ### Configuration
 
-Ajoutez vos cles dans `.env` :
+Ajoutez vos clés dans `.env` :
 
 ```env
-# Passerelle par defaut
+# Passerelle par défaut
 AFRIPAY_DEFAULT_GATEWAY=wave
 AFRIPAY_CURRENCY=XOF
 
-# Securite : seuls les webhooks peuvent confirmer un paiement (recommande)
-# Mettre a false en dev si les webhooks ne peuvent pas atteindre votre serveur
+# Sécurité : seuls les webhooks peuvent confirmer un paiement (recommandé)
+# Mettre à false en dev si les webhooks ne peuvent pas atteindre votre serveur
 AFRIPAY_TRUST_WEBHOOK_ONLY=true
 
-# Activer/desactiver les passerelles individuellement
+# Activer/désactiver les passerelles individuellement
 AFRIPAY_WAVE_ENABLED=true
 AFRIPAY_STRIPE_ENABLED=true
 AFRIPAY_PAYDUNYA_ENABLED=true
@@ -165,14 +165,14 @@ $payment = AfriPay::via('wave')->charge([
 ]);
 
 // $payment['redirect_url']  -> URL de paiement (rediriger l'utilisateur)
-// $payment['transaction']   -> Instance Transaction (sauvegardee en DB)
+// $payment['transaction']   -> Instance Transaction (sauvegardée en DB)
 
 return redirect($payment['redirect_url']);
 ```
 
-#### Lier a un modele (polymorphic)
+#### Lier à un modèle (polymorphic)
 
-Passez `payable_type` et `payable_id` pour lier la transaction a n'importe quel modele de votre application. C'est ce lien qui permet de router la logique metier dans vos listeners (voir section suivante).
+Passez `payable_type` et `payable_id` pour lier la transaction à n'importe quel modèle de votre application. C'est ce lien qui permet de router la logique métier dans vos listeners (voir section suivante).
 
 ```php
 // Abonnement
@@ -193,7 +193,7 @@ $payment = AfriPay::via('paydunya')->charge([
     'payable_id'    => $order->id,
 ]);
 
-// Recharge de wallet (sans modele lie)
+// Recharge de wallet (sans modèle lié)
 $payment = AfriPay::via('orange_money')->charge([
     'amount'        => 5000,
     'success_url'   => route('payment.success'),
@@ -202,13 +202,13 @@ $payment = AfriPay::via('orange_money')->charge([
 ]);
 ```
 
-#### Ecouter les evenements (le plus important)
+#### Écouter les événements (le plus important)
 
-> **Important :** Laravel auto-decouvre uniquement les listeners pour les events dans `App\Events\*`.
-> Les events d'un package vendor comme AfriPay (`SunuCode\AfriPay\Events\*`) ne sont **jamais auto-decouverts**.
+> **Important :** Laravel auto-découvre uniquement les listeners pour les events dans `App\Events\*`.
+> Les events d'un package vendor comme AfriPay (`SunuCode\AfriPay\Events\*`) ne sont **jamais auto-découverts**.
 > Vous devez les enregistrer manuellement.
 
-Si vous avez utilise `php artisan afripay:install`, les listeners sont deja enregistres avec des `// TODO` a completer. Sinon, ajoutez-les dans `AppServiceProvider::boot()`.
+Si vous avez utilisé `php artisan afripay:install`, les listeners sont déjà enregistrés avec des `// TODO` à compléter. Sinon, ajoutez-les dans `AppServiceProvider::boot()`.
 
 **Cas simple** — une seule logique de paiement :
 
@@ -235,7 +235,7 @@ public function boot(): void
 {
     Event::listen(PaymentCompleted::class, function ($event) {
         $transaction = $event->transaction;
-        $payable = $transaction->payable; // Le modele lie (Order, Subscription...)
+        $payable = $transaction->payable; // Le modèle lié (Order, Subscription...)
 
         match ($transaction->payable_type) {
             \App\Models\Subscription::class => $payable->activate(),
@@ -262,7 +262,7 @@ public function boot(): void
 }
 ```
 
-**Avec des classes Listener dediees** (recommande pour les gros projets) :
+**Avec des classes Listener dédiées** (recommandé pour les gros projets) :
 
 ```php
 Event::listen(PaymentCompleted::class, HandleCompletedPayment::class);
@@ -271,9 +271,9 @@ Event::listen(PaymentFailed::class, HandleFailedPayment::class);
 
 #### Gestion du retour (success URL)
 
-Quand l'utilisateur est redirige vers votre `success_url` apres le paiement, le webhook n'est pas forcement encore arrive. Vous **devez** appeler `verifyAndProcess()` dans votre controller de retour pour confirmer le paiement :
+Quand l'utilisateur est redirigé vers votre `success_url` après le paiement, le webhook n'est pas forcément encore arrivé. Vous **devez** appeler `verifyAndProcess()` dans votre controller de retour pour confirmer le paiement :
 
-Si vous avez utilise `php artisan afripay:install`, le controller est deja genere avec cette logique. Sinon, voici le code a ajouter dans votre controller de retour :
+Si vous avez utilisé `php artisan afripay:install`, le controller est déjà généré avec cette logique. Sinon, voici le code à ajouter dans votre controller de retour :
 
 ```php
 use SunuCode\AfriPay\Facades\AfriPay;
@@ -283,20 +283,20 @@ public function success(string $reference)
 {
     $transaction = AfriPayTransaction::where('reference', $reference)->firstOrFail();
 
-    // Verifie aupres de la passerelle ET dispatche PaymentCompleted si confirme
+    // Vérifie auprès de la passerelle ET dispatche PaymentCompleted si confirmé
     $transaction = AfriPay::verifyAndProcess($transaction);
 
     if ($transaction->status->isCompleted()) {
         return view('payment.success', compact('transaction'));
     }
 
-    // Le paiement n'est pas encore confirme (webhook en attente)
+    // Le paiement n'est pas encore confirmé (webhook en attente)
     return view('payment.pending', compact('transaction'));
 }
 ```
 
 > **Sans cet appel**, si le webhook arrive en retard (ou jamais en dev local),
-> l'utilisateur verra une page de succes mais votre logique metier ne sera jamais executee.
+> l'utilisateur verra une page de succès mais votre logique métier ne sera jamais exécutée.
 
 #### Rembourser
 
@@ -308,11 +308,11 @@ $transaction = AfriPay::refund($transaction, 'Client insatisfait');
 #### Lister les passerelles actives
 
 ```php
-// Toutes les passerelles activees via .env
+// Toutes les passerelles activées via .env
 $gateways = AfriPay::enabledGateways();
 // ['wave', 'stripe', 'paydunya', 'paytech']
 
-// Verifier si une passerelle est active
+// Vérifier si une passerelle est active
 if (AfriPay::isEnabled('orange_money')) {
     // ...
 }
@@ -321,25 +321,25 @@ if (AfriPay::isEnabled('orange_money')) {
 #### Mode webhook-only vs fallback (trust_webhook_only)
 
 ```env
-# PRODUCTION (recommande) — seul le webhook peut confirmer un paiement
+# PRODUCTION (recommandé) — seul le webhook peut confirmer un paiement
 AFRIPAY_TRUST_WEBHOOK_ONLY=true
 
-# DEVELOPPEMENT — l'URL de retour peut aussi confirmer
+# DÉVELOPPEMENT — l'URL de retour peut aussi confirmer
 AFRIPAY_TRUST_WEBHOOK_ONLY=false
 ```
 
-Quand `trust_webhook_only=true`, `verifyAndProcess()` verifie le statut aupres de la passerelle mais ne dispatche **aucun evenement**. Seul le webhook declenche `PaymentCompleted`. C'est plus sur car ca empeche un utilisateur de forger une URL de succes.
+Quand `trust_webhook_only=true`, `verifyAndProcess()` vérifie le statut auprès de la passerelle mais ne dispatche **aucun événement**. Seul le webhook déclenche `PaymentCompleted`. C'est plus sûr car ça empêche un utilisateur de forger une URL de succès.
 
-Quand `trust_webhook_only=false`, les deux chemins (webhook ET URL de retour) peuvent declencher les evenements. Utile en dev local quand les webhooks ne peuvent pas atteindre votre machine.
+Quand `trust_webhook_only=false`, les deux chemins (webhook ET URL de retour) peuvent déclencher les événements. Utile en dev local quand les webhooks ne peuvent pas atteindre votre machine.
 
-> **Piege courant en developpement :** Si vous developpez en local sans tunnel (ngrok, Expose...),
-> les webhooks ne peuvent pas atteindre votre machine. Avec `AFRIPAY_TRUST_WEBHOOK_ONLY=true` (defaut),
-> `verifyAndProcess()` ne declenchera **aucun event** et vos paiements resteront en `pending`.
+> **Piège courant en développement :** Si vous développez en local sans tunnel (ngrok, Expose...),
+> les webhooks ne peuvent pas atteindre votre machine. Avec `AFRIPAY_TRUST_WEBHOOK_ONLY=true` (défaut),
+> `verifyAndProcess()` ne déclenchera **aucun event** et vos paiements resteront en `pending`.
 >
 > **Solution :** Mettez `AFRIPAY_TRUST_WEBHOOK_ONLY=false` dans votre `.env` local.
 > N'oubliez pas de remettre `true` en production.
 
-#### Ajouter une passerelle personnalisee
+#### Ajouter une passerelle personnalisée
 
 ```php
 // Dans un ServiceProvider
@@ -355,7 +355,7 @@ AfriPay::via('cinetpay')->charge([...]);
 
 ### Webhooks
 
-Les webhooks sont automatiquement enregistres a :
+Les webhooks sont automatiquement enregistrés à :
 
 ```
 POST /afripay/webhooks/wave
@@ -369,28 +369,28 @@ POST /afripay/webhooks/paypal
 Le chemin est configurable via `AFRIPAY_WEBHOOK_PATH`.
 
 **Chaque webhook :**
-- Verifie la signature (HMAC-SHA256 pour Wave/Stripe/PayTech, master_key pour PayDunya)
-- Verifie le montant (tolerance +/- 1 unite)
-- Utilise `lockForUpdate()` pour eviter les doublons
+- Vérifie la signature (HMAC-SHA256 pour Wave/Stripe/PayTech, master_key pour PayDunya)
+- Vérifie le montant (tolérance +/- 1 unité)
+- Utilise `lockForUpdate()` pour éviter les doublons
 - Dispatche `PaymentCompleted` ou `PaymentFailed`
 
-### Securite
+### Sécurité
 
-- **Idempotence** : Le champ `processed_at` empeche le double-traitement
+- **Idempotence** : Le champ `processed_at` empêche le double-traitement
 - **Verrouillage DB** : `lockForUpdate()` sur chaque transaction pendant le webhook
-- **Verification de montant** : Tolerance +/- 1 unite avant d'accepter
-- **Anti-replay** : Timestamps verifies (Wave, Stripe) avec tolerance de 5 min
-- **Zero-decimal** : XOF/XAF geres automatiquement (pas de x100 pour Stripe)
-- **Orange Money** : Contre-verification API obligatoire (pas de signature webhook)
+- **Vérification de montant** : Tolérance +/- 1 unité avant d'accepter
+- **Anti-replay** : Timestamps vérifiés (Wave, Stripe) avec tolérance de 5 min
+- **Zero-decimal** : XOF/XAF gérés automatiquement (pas de x100 pour Stripe)
+- **Orange Money** : Contre-vérification API obligatoire (pas de signature webhook)
 
-### Evenements disponibles
+### Événements disponibles
 
-| Evenement | Quand | Donnees |
+| Événement | Quand | Données |
 |-----------|-------|---------|
-| `PaymentInitiated` | Apres `charge()` | `$transaction`, `$gateway` |
-| `PaymentCompleted` | Webhook confirme | `$transaction` |
-| `PaymentFailed` | Webhook echoue | `$transaction` |
-| `PaymentRefunded` | Apres `refund()` | `$transaction`, `$reason` |
+| `PaymentInitiated` | Après `charge()` | `$transaction`, `$gateway` |
+| `PaymentCompleted` | Webhook confirmé | `$transaction` |
+| `PaymentFailed` | Webhook échoué | `$transaction` |
+| `PaymentRefunded` | Après `refund()` | `$transaction`, `$reason` |
 
 ---
 
