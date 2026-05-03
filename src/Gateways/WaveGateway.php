@@ -147,13 +147,23 @@ class WaveGateway extends AbstractGateway
      */
     protected function signedRequest(string $method, string $url, array $data = [])
     {
-        $jsonBody = json_encode($data);
-        $signature = SignatureVerifier::buildWaveSignature($jsonBody, $this->config['api_secret']);
+        $method = strtoupper($method);
+        $hasBody = in_array($method, ['POST', 'PATCH', 'PUT'], true);
+        $jsonBody = $hasBody ? json_encode($data) : '';
 
-        return Http::withToken($this->config['api_key'])
-            ->withHeaders(['Wave-Signature' => $signature])
-            ->withBody($jsonBody, 'application/json')
-            ->send($method, $url);
+        $request = Http::withToken($this->config['api_key']);
+
+        if ($hasBody) {
+            $request = $request->withBody($jsonBody, 'application/json');
+        }
+
+        $signingSecret = $this->config['api_secret'] ?? '';
+        if ($signingSecret !== '') {
+            $signature = SignatureVerifier::buildWaveSignature($jsonBody, $signingSecret);
+            $request = $request->withHeaders(['Wave-Signature' => $signature]);
+        }
+
+        return $request->send($method, $url);
     }
 
     private function baseUrl(): string
