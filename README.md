@@ -115,7 +115,11 @@ AFRIPAY_PAYPAL_ENABLED=false
 
 # Wave
 WAVE_API_KEY=wave_sn_...
-WAVE_API_SECRET=wave_sn_...
+# WAVE_API_SECRET (signing secret) : OPTIONNEL
+# Renseigner UNIQUEMENT si "Request Signing" est activé sur la clé API Wave.
+# Si non activé, laisser vide.
+WAVE_API_SECRET=
+# WAVE_WEBHOOK_SECRET : OBLIGATOIRE en production si AFRIPAY_TRUST_WEBHOOK_ONLY=true
 WAVE_WEBHOOK_SECRET=wave_sn_WHS_...
 
 # Stripe
@@ -329,6 +333,8 @@ AFRIPAY_TRUST_WEBHOOK_ONLY=false
 ```
 
 Quand `trust_webhook_only=true`, `verifyAndProcess()` vérifie le statut auprès de la passerelle mais ne dispatche **aucun événement**. Seul le webhook déclenche `PaymentCompleted`. C'est plus sûr car ça empêche un utilisateur de forger une URL de succès.
+
+⚠️ **Exigence de sécurité** : avec `trust_webhook_only=true`, configurez le secret webhook de chaque passerelle active (ex: `WAVE_WEBHOOK_SECRET`) ; sinon la confirmation de paiement par webhook ne pourra pas être validée.
 
 Quand `trust_webhook_only=false`, les deux chemins (webhook ET URL de retour) peuvent déclencher les événements. Utile en dev local quand les webhooks ne peuvent pas atteindre votre machine.
 

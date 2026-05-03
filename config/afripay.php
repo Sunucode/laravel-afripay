@@ -98,6 +98,11 @@ return [
         |----------------------------------------------------------------------
         | Mobile money — dominant in West Africa.
         | No sandbox available — uses 5 XOF in local/testing mode.
+        | WAVE_API_SECRET is OPTIONAL:
+        | - leave empty if Request Signing is disabled on your Wave API key
+        | - set it only if Request Signing is enabled
+        | WAVE_WEBHOOK_SECRET is REQUIRED in production when
+        | AFRIPAY_TRUST_WEBHOOK_ONLY=true (recommended).
         | Docs: https://docs.wave.com
         */
         'wave' => [
