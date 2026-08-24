@@ -73,9 +73,24 @@ class PayDunyaGateway extends AbstractGateway
         ];
     }
 
+    /**
+     * Handle a PayDunya IPN.
+     *
+     * PayDunya POSTs `application/x-www-form-urlencoded` data nested under a
+     * single `data` node: `data[status]`, `data[invoice][token]`,
+     * `data[custom_data][...]`. Callers hand over the raw request body, so the
+     * node has to be unwrapped before anything else — without it, neither the
+     * token nor the reference resolved and every IPN was silently ignored.
+     *
+     * A flat payload is still accepted, for callers that unwrap it themselves.
+     */
     public function handleWebhook(array $data): ?Transaction
     {
-        $token = $data['token'] ?? $data['invoice_token'] ?? null;
+        if (isset($data['data']) && is_array($data['data'])) {
+            $data = $data['data'];
+        }
+
+        $token = $data['invoice']['token'] ?? $data['token'] ?? $data['invoice_token'] ?? null;
         $reference = $data['custom_data']['reference'] ?? null;
 
         return DB::transaction(function () use ($data, $token, $reference) {
