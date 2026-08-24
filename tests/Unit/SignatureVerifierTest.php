@@ -87,3 +87,39 @@ test('buildWaveSignature produces valid signature', function () {
     // Verify it passes our own verification
     expect(SignatureVerifier::verifyWaveSignature($signature, $body, $secret))->toBeTrue();
 });
+
+test('paydunya IPN is accepted when data.hash is the sha512 of the master key', function () {
+    // PayDunya ne signe pas ses IPN : il renvoie data[hash], qui vaut le
+    // SHA-512 de la clé maître. C'est le cas nominal, et il était rejeté.
+    $gateway = new SunuCode\AfriPay\Gateways\PayDunyaGateway([
+        'master_key' => 'ma-cle-maitre',
+        'private_key' => 'live_private_x',
+        'token' => 'jeton',
+        'mode' => 'test',
+    ]);
+
+    expect($gateway->verifySignature(hash('sha512', 'ma-cle-maitre'), ''))->toBeTrue();
+});
+
+test('paydunya IPN still accepts the raw master key', function () {
+    $gateway = new SunuCode\AfriPay\Gateways\PayDunyaGateway([
+        'master_key' => 'ma-cle-maitre',
+    ]);
+
+    expect($gateway->verifySignature('ma-cle-maitre', ''))->toBeTrue();
+});
+
+test('paydunya IPN is rejected with a wrong or empty hash', function () {
+    $gateway = new SunuCode\AfriPay\Gateways\PayDunyaGateway([
+        'master_key' => 'ma-cle-maitre',
+    ]);
+
+    expect($gateway->verifySignature(hash('sha512', 'autre-cle'), ''))->toBeFalse();
+    expect($gateway->verifySignature('', ''))->toBeFalse();
+});
+
+test('paydunya IPN is rejected when no master key is configured', function () {
+    $gateway = new SunuCode\AfriPay\Gateways\PayDunyaGateway(['master_key' => '']);
+
+    expect($gateway->verifySignature(hash('sha512', ''), ''))->toBeFalse();
+});

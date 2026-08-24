@@ -153,11 +153,29 @@ class PayDunyaGateway extends AbstractGateway
         return $transaction->fresh();
     }
 
+    /**
+     * Verify a PayDunya IPN.
+     *
+     * PayDunya does not sign its IPN: it sends back `data[hash]`, which is the
+     * SHA-512 hash of your master key. Comparing the raw master key — as this
+     * method used to — rejected every legitimate IPN.
+     *
+     * The raw master key is still accepted, since some integrations forward it
+     * as-is (and the `master_key` field of older payloads carries it).
+     */
     public function verifySignature(string $signature, string $rawBody): bool
     {
         $masterKey = $this->config['master_key'] ?? '';
 
-        return $masterKey && hash_equals($masterKey, $signature);
+        if ($masterKey === '' || $signature === '') {
+            return false;
+        }
+
+        if (hash_equals(hash('sha512', $masterKey), $signature)) {
+            return true;
+        }
+
+        return hash_equals($masterKey, $signature);
     }
 
     private function verifyByToken(string $token, array $callbackData): ?Transaction

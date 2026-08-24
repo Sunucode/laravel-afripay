@@ -68,9 +68,14 @@ class WebhookController extends Controller
     {
         Log::info('AfriPay: PayDunya webhook received');
 
-        $receivedKey = $request->input('data.hash') ?? $request->input('master_key') ?? '';
+        $receivedKey = (string) ($request->input('data.hash') ?? $request->input('master_key') ?? '');
         if (! $this->manager->verifyWebhookSignature('paydunya', $receivedKey, '')) {
-            Log::warning('AfriPay: PayDunya master_key invalid');
+            // Length is logged, never the value: it tells a SHA-512 hash (128)
+            // from a raw master key or an empty payload, which is enough to
+            // diagnose a rejection without exposing anything.
+            Log::warning('AfriPay: PayDunya master_key invalid', [
+                'received_length' => strlen($receivedKey),
+            ]);
 
             return response()->json(['error' => 'Invalid master_key'], 401);
         }
