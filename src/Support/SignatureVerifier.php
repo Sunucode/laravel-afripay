@@ -10,12 +10,25 @@ class SignatureVerifier
      */
     public static function verifyWaveSignature(string $signature, string $rawBody, string $secret, int $toleranceSeconds = 300): bool
     {
-        if (! preg_match('/t=(\d+),v1=(.+)/', $signature, $matches)) {
-            return false;
+        // t={timestamp},v1={hmac}[,v1={hmac}...]: several v1 during a key rotation (https://docs.wave.com/webhook).
+        $timestamp = null;
+        $received = [];
+
+        foreach (explode(',', $signature) as $element) {
+            $parts = explode('=', trim($element), 2);
+            if (count($parts) !== 2) {
+                continue;
+            }
+            if ($parts[0] === 't' && ctype_digit($parts[1])) {
+                $timestamp = $parts[1];
+            } elseif ($parts[0] === 'v1') {
+                $received[] = $parts[1];
+            }
         }
 
-        $timestamp = $matches[1];
-        $receivedHmac = $matches[2];
+        if ($timestamp === null || $received === []) {
+            return false;
+        }
 
         // Replay attack protection
         if (abs(time() - (int) $timestamp) > $toleranceSeconds) {
@@ -24,7 +37,13 @@ class SignatureVerifier
 
         $expectedHmac = hash_hmac('sha256', $timestamp.$rawBody, $secret);
 
-        return hash_equals($expectedHmac, $receivedHmac);
+        foreach ($received as $hmac) {
+            if (hash_equals($expectedHmac, $hmac)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

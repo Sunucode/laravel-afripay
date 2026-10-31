@@ -121,6 +121,8 @@ WAVE_API_KEY=wave_sn_...
 WAVE_API_SECRET=
 # WAVE_WEBHOOK_SECRET : OBLIGATOIRE en production si AFRIPAY_TRUST_WEBHOOK_ONLY=true
 WAVE_WEBHOOK_SECRET=wave_sn_WHS_...
+# WAVE_TEST_AMOUNT : OPTIONNEL. Montant facturé à la place du vrai, pour tester en production avec un petit débit (ex. 5). Vide = montant réel.
+WAVE_TEST_AMOUNT=
 
 # Stripe
 STRIPE_KEY=pk_test_...
@@ -137,6 +139,9 @@ PAYDUNYA_MODE=test
 ORANGE_MONEY_CLIENT_ID=...
 ORANGE_MONEY_CLIENT_SECRET=...
 ORANGE_MONEY_MERCHANT_KEY=...
+# Bac à sable : orange-money-webpay/dev/v1 et OUV. Production : chemin du pays (ex. orange-money-webpay/sn/v1) et XOF
+ORANGE_MONEY_API_PATH=orange-money-webpay/dev/v1
+ORANGE_MONEY_CURRENCY=OUV
 
 # PayPal
 PAYPAL_CLIENT_ID=...
@@ -287,10 +292,11 @@ public function success(string $reference)
 {
     $transaction = AfriPayTransaction::where('reference', $reference)->firstOrFail();
 
-    // Vérifie auprès de la passerelle ET dispatche PaymentCompleted si confirmé
+    // Interroge la passerelle ; avec trust_webhook_only=false, règle aussi le paiement
     $transaction = AfriPay::verifyAndProcess($transaction);
 
-    if ($transaction->status->isCompleted()) {
+    // Payé en base, ou confirmé par la passerelle en attendant le webhook
+    if ($transaction->isConfirmedByGateway()) {
         return view('payment.success', compact('transaction'));
     }
 
@@ -332,11 +338,11 @@ AFRIPAY_TRUST_WEBHOOK_ONLY=true
 AFRIPAY_TRUST_WEBHOOK_ONLY=false
 ```
 
-Quand `trust_webhook_only=true`, `verifyAndProcess()` vérifie le statut auprès de la passerelle mais ne dispatche **aucun événement**. Seul le webhook déclenche `PaymentCompleted`. C'est plus sûr car ça empêche un utilisateur de forger une URL de succès.
+Quand `trust_webhook_only=true`, `verifyAndProcess()` lit le statut auprès de la passerelle sans rien enregistrer ni dispatcher : le statut lu est dans `$transaction->remoteStatus`, et `$transaction->isConfirmedByGateway()` dit si le paiement est reçu. Seul le webhook règle la transaction et déclenche `PaymentCompleted`. C'est plus sûr car ça empêche un utilisateur de forger une URL de succès, et le webhook qui arrive après la page de retour déclenche bien l'événement.
 
 ⚠️ **Exigence de sécurité** : avec `trust_webhook_only=true`, configurez le secret webhook de chaque passerelle active (ex: `WAVE_WEBHOOK_SECRET`) ; sinon la confirmation de paiement par webhook ne pourra pas être validée.
 
-Quand `trust_webhook_only=false`, les deux chemins (webhook ET URL de retour) peuvent déclencher les événements. Utile en dev local quand les webhooks ne peuvent pas atteindre votre machine.
+Quand `trust_webhook_only=false`, les deux chemins (webhook ET URL de retour) peuvent régler la transaction, sous verrou : le premier arrivé la règle et dispatche l'événement, une seule fois ; l'autre ne fait rien. Utile en dev local quand les webhooks ne peuvent pas atteindre votre machine.
 
 > **Piège courant en développement :** Si vous développez en local sans tunnel (ngrok, Expose...),
 > les webhooks ne peuvent pas atteindre votre machine. Avec `AFRIPAY_TRUST_WEBHOOK_ONLY=true` (défaut),
@@ -372,17 +378,19 @@ POST /afripay/webhooks/paytech
 POST /afripay/webhooks/paypal
 ```
 
-Le chemin est configurable via `AFRIPAY_WEBHOOK_PATH`.
+Le chemin est configurable via `AFRIPAY_WEBHOOK_PATH`. Seules les passerelles activées (`AFRIPAY_*_ENABLED`) ont leur route.
 
 **Chaque webhook :**
 - Vérifie la signature (HMAC-SHA256 pour Wave/Stripe/PayTech, master_key pour PayDunya)
-- Vérifie le montant (tolérance +/- 1 unité)
-- Utilise `lockForUpdate()` pour éviter les doublons
-- Dispatche `PaymentCompleted` ou `PaymentFailed`
+- PayDunya et Orange Money : relit le statut et le montant auprès de l'API, jamais depuis la notification
+- Vérifie le montant (tolérance +/- 1 unité) et la devise : un écart fait échouer le paiement
+- Utilise `lockForUpdate()` : une transaction ne quitte « en attente » qu'une fois
+- Dispatche `PaymentCompleted` ou `PaymentFailed` seulement quand le statut change : une notification rejouée ne déclenche rien
 
 ### Sécurité
 
-- **Idempotence** : Le champ `processed_at` empêche le double-traitement
+- **Idempotence** : une transaction ne change de statut qu'une fois, et l'événement part à ce moment-là seulement ; le champ `processed_at` (`markAsProcessed()`) protège en plus votre propre traitement
+- **Référence unique** : index unique sur (passerelle, référence)
 - **Verrouillage DB** : `lockForUpdate()` sur chaque transaction pendant le webhook
 - **Vérification de montant** : Tolérance +/- 1 unité avant d'accepter
 - **Anti-replay** : Timestamps vérifiés (Wave, Stripe) avec tolérance de 5 min
@@ -486,7 +494,8 @@ public function success(string $reference)
     $transaction = AfriPayTransaction::where('reference', $reference)->firstOrFail();
     $transaction = AfriPay::verifyAndProcess($transaction);
 
-    if ($transaction->status->isCompleted()) {
+    // Settled, or confirmed by the gateway while the webhook is on its way
+    if ($transaction->isConfirmedByGateway()) {
         return view('payment.success', compact('transaction'));
     }
 
@@ -495,6 +504,8 @@ public function success(string $reference)
 ```
 
 ### AFRIPAY_TRUST_WEBHOOK_ONLY
+
+With `true` (default), `verifyAndProcess()` only reads the gateway status (`$transaction->remoteStatus`, `isConfirmedByGateway()`): the webhook alone settles the transaction and dispatches `PaymentCompleted`. With `false`, the return page may settle it too; whichever comes first settles it under a lock and dispatches once.
 
 > **Common pitfall in development:** Without a tunnel (ngrok, Expose...), webhooks can't reach
 > your local machine. With `AFRIPAY_TRUST_WEBHOOK_ONLY=true` (default), `verifyAndProcess()` will
@@ -521,9 +532,11 @@ PaymentManager::extend('cinetpay', fn($config) => new CinetPayGateway($config));
 
 ### Security
 
-- **Idempotent processing** via atomic `processed_at` flag
+- **Idempotent processing**: a transaction leaves pending once, and events are dispatched only then; a replayed webhook dispatches nothing
+- **Unique reference** per gateway (database index)
+- **Webhook routes** only for enabled gateways
 - **Database locking** (`lockForUpdate`) prevents race conditions
-- **Amount verification** with configurable tolerance
+- **Amount and currency verification**: a mismatch fails the payment
 - **Replay protection** with timestamp validation (Wave, Stripe)
 - **Zero-decimal currencies** (XOF, XAF) handled automatically
 - **Orange Money**: Mandatory API counter-verification (no webhook signature)

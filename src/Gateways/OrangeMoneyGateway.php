@@ -2,13 +2,13 @@
 
 namespace SunuCode\AfriPay\Gateways;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use SunuCode\AfriPay\Contracts\SettlesFromGateway;
 use SunuCode\AfriPay\Enums\TransactionStatus;
 use SunuCode\AfriPay\Models\Transaction;
 
-class OrangeMoneyGateway extends AbstractGateway
+class OrangeMoneyGateway extends AbstractGateway implements SettlesFromGateway
 {
     public function name(): string
     {
@@ -18,7 +18,7 @@ class OrangeMoneyGateway extends AbstractGateway
     public function charge(array $params): array
     {
         $amount = $params['amount'];
-        $currency = $params['currency'] ?? 'OUV';
+        $currency = $params['currency'] ?? $this->currency();
         $reference = $params['reference'] ?? $this->generateReference('OM');
 
         $token = $this->getOAuthToken();
@@ -27,7 +27,7 @@ class OrangeMoneyGateway extends AbstractGateway
 
         $body = [
             'merchant_key' => $merchantKey,
-            'currency' => 'OUV',
+            'currency' => $currency,
             'order_id' => $reference,
             'amount' => (int) $amount,
             'return_url' => $params['success_url'].(str_contains($params['success_url'], '?') ? '&' : '?').'reference='.$reference,
@@ -38,7 +38,7 @@ class OrangeMoneyGateway extends AbstractGateway
 
         $response = Http::withToken($token)
             ->acceptJson()
-            ->post($this->baseUrl().'/orange-money-webpay/dev/v1/webpayment', $body);
+            ->post($this->apiUrl('webpayment'), $body);
 
         if (! $response->successful() || ! isset($response->json()['payment_url'])) {
             Log::error('AfriPay Orange Money: checkout failed', [
@@ -69,7 +69,7 @@ class OrangeMoneyGateway extends AbstractGateway
 
     /**
      * Orange Money has NO webhook signature.
-     * NEVER trust callback data — always counter-verify via API.
+     * NEVER trust callback data: the status is always read back from the API.
      */
     public function handleWebhook(array $data): ?Transaction
     {
@@ -78,61 +78,54 @@ class OrangeMoneyGateway extends AbstractGateway
             return null;
         }
 
-        return DB::transaction(function () use ($orderId) {
-            $transaction = Transaction::where('reference', $orderId)
-                ->where('gateway', 'orange_money')
-                ->lockForUpdate()
-                ->first();
+        $transaction = Transaction::where('reference', $orderId)
+            ->where('gateway', $this->name())
+            ->first();
 
-            if (! $transaction || $transaction->status === TransactionStatus::Completed) {
-                return $transaction;
-            }
-
-            // Counter-verify via Orange Money API (mandatory — no signature)
-            return $this->verify($transaction);
-        });
-    }
-
-    public function verify(Transaction $transaction): Transaction
-    {
-        if ($transaction->status !== TransactionStatus::Pending) {
-            return $transaction;
+        if (! $transaction || $transaction->status !== TransactionStatus::Pending) {
+            return null;
         }
 
-        try {
-            $token = $this->getOAuthToken();
+        return $this->settle($transaction);
+    }
 
-            $response = Http::withToken($token)
+    protected function fetchStatus(Transaction $transaction): ?array
+    {
+        try {
+            $response = Http::withToken($this->getOAuthToken())
                 ->acceptJson()
-                ->post($this->baseUrl().'/orange-money-webpay/dev/v1/transactionstatus', [
+                ->post($this->apiUrl('transactionstatus'), [
                     'order_id' => $transaction->reference,
                     'amount' => (int) $transaction->amount,
                     'pay_token' => $transaction->gateway_reference,
                 ]);
-
-            if ($response->successful()) {
-                $data = $response->json();
-                $status = $data['status'] ?? null;
-
-                $newStatus = match ($status) {
-                    'SUCCESS' => TransactionStatus::Completed,
-                    'FAILED', 'EXPIRED' => TransactionStatus::Failed,
-                    default => TransactionStatus::Pending,
-                };
-
-                $transaction->update([
-                    'status' => $newStatus,
-                    'gateway_response' => $data,
-                ]);
-            }
         } catch (\Throwable $e) {
-            Log::warning('AfriPay Orange Money: verification failed', [
+            Log::warning('AfriPay Orange Money: status check failed', [
                 'transaction_id' => $transaction->id,
                 'error' => $e->getMessage(),
             ]);
+
+            return null;
         }
 
-        return $transaction->fresh();
+        if (! $response->successful()) {
+            return null;
+        }
+
+        $data = $response->json() ?? [];
+
+        // The status check is keyed on order, amount and pay token: Orange
+        // answers SUCCESS only for that amount, which it does not echo back.
+        return [
+            'status' => match (strtoupper((string) ($data['status'] ?? ''))) {
+                'SUCCESS' => TransactionStatus::Completed,
+                'FAILED', 'EXPIRED' => TransactionStatus::Failed,
+                default => TransactionStatus::Pending,
+            },
+            'amount' => (float) $transaction->amount,
+            'currency' => null,
+            'data' => $data,
+        ];
     }
 
     /**
@@ -164,6 +157,22 @@ class OrangeMoneyGateway extends AbstractGateway
         }
 
         throw new \RuntimeException('Orange Money OAuth failed: '.$response->body());
+    }
+
+    /**
+     * Sandbox: orange-money-webpay/dev/v1 with currency OUV. Production: the
+     * country path given by Orange (e.g. orange-money-webpay/sn/v1) with XOF.
+     */
+    private function apiUrl(string $endpoint): string
+    {
+        $path = trim($this->config['api_path'] ?? 'orange-money-webpay/dev/v1', '/');
+
+        return $this->baseUrl().'/'.$path.'/'.$endpoint;
+    }
+
+    private function currency(): string
+    {
+        return $this->config['currency'] ?? 'OUV';
     }
 
     private function baseUrl(): string

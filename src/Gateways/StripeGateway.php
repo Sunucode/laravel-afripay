@@ -2,15 +2,15 @@
 
 namespace SunuCode\AfriPay\Gateways;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use SunuCode\AfriPay\Contracts\SettlesFromGateway;
 use SunuCode\AfriPay\Enums\TransactionStatus;
 use SunuCode\AfriPay\Models\Transaction;
 use SunuCode\AfriPay\Support\AmountConverter;
 use SunuCode\AfriPay\Support\SignatureVerifier;
 
-class StripeGateway extends AbstractGateway
+class StripeGateway extends AbstractGateway implements SettlesFromGateway
 {
     public function name(): string
     {
@@ -76,88 +76,60 @@ class StripeGateway extends AbstractGateway
         ];
     }
 
+    /**
+     * checkout.session.completed with payment_status « paid » settles the payment;
+     * an expired session fails it. Amount and currency are checked against the
+     * transaction, in the currency's own unit (zero-decimal for XOF).
+     */
     public function handleWebhook(array $data): ?Transaction
     {
-        $eventType = $data['type'] ?? '';
         $object = $data['data']['object'] ?? [];
-
         $reference = $object['client_reference_id'] ?? $object['metadata']['reference'] ?? null;
-        $sessionId = ($eventType === 'checkout.session.completed') ? ($object['id'] ?? null) : null;
 
-        return DB::transaction(function () use ($data, $object, $sessionId, $reference) {
-            $query = Transaction::where('gateway', 'stripe')
-                ->where('status', TransactionStatus::Pending);
+        if (! $reference) {
+            return null;
+        }
 
-            if ($sessionId && $reference) {
-                $query->where(function ($q) use ($sessionId, $reference) {
-                    $q->where('gateway_reference', $sessionId)
-                        ->orWhere('reference', $reference);
-                });
-            } elseif ($sessionId) {
-                $query->where('gateway_reference', $sessionId);
-            } elseif ($reference) {
-                $query->where('reference', $reference);
-            } else {
-                return null;
-            }
+        $remote = $this->readSession($object);
 
-            $transaction = $query->lockForUpdate()->first();
+        if ($remote['status'] === TransactionStatus::Pending) {
+            return null;
+        }
 
-            if (! $transaction) {
-                return null;
-            }
-
-            // Verify amount
-            $stripeAmountTotal = (float) ($object['amount_total'] ?? 0);
-            $paidAmount = null;
-            if ($stripeAmountTotal > 0) {
-                $cur = strtolower($object['currency'] ?? $transaction->currency ?? 'xof');
-                $paidAmount = AmountConverter::fromStripeAmount((int) $stripeAmountTotal, $cur);
-            }
-
-            $paymentStatus = $object['payment_status'] ?? $object['status'] ?? 'unknown';
-
-            $newStatus = match ($paymentStatus) {
-                'paid', 'succeeded', 'complete' => TransactionStatus::Completed,
-                'failed', 'canceled', 'expired' => TransactionStatus::Failed,
-                default => TransactionStatus::Pending,
-            };
-
-            if ($newStatus === TransactionStatus::Completed) {
-                return $this->completeTransaction($transaction, $data, $paidAmount);
-            }
-
-            if ($newStatus === TransactionStatus::Failed) {
-                return $this->failTransaction($transaction, $data);
-            }
-
-            return $transaction;
-        });
+        return $this->transition($reference, $remote['status'], $data, $remote['amount'], $remote['currency']);
     }
 
-    public function verify(Transaction $transaction): Transaction
+    protected function fetchStatus(Transaction $transaction): ?array
     {
-        if (! $transaction->gateway_reference || $transaction->status !== TransactionStatus::Pending) {
-            return $transaction;
+        if (! $transaction->gateway_reference) {
+            return null;
         }
 
         $response = Http::withToken($this->config['secret'])
             ->get("https://api.stripe.com/v1/checkout/sessions/{$transaction->gateway_reference}");
 
-        if ($response->successful()) {
-            $data = $response->json();
-            $newStatus = match ($data['payment_status'] ?? 'unknown') {
-                'paid' => TransactionStatus::Completed,
+        return $response->successful() ? $this->readSession($response->json()) : null;
+    }
+
+    /**
+     * @return array{status: TransactionStatus, amount: ?float, currency: ?string, data: array}
+     */
+    private function readSession(array $session): array
+    {
+        $currency = $session['currency'] ?? null;
+
+        return [
+            'status' => match (true) {
+                ($session['payment_status'] ?? null) === 'paid' => TransactionStatus::Completed,
+                ($session['status'] ?? null) === 'expired' => TransactionStatus::Failed,
                 default => TransactionStatus::Pending,
-            };
-
-            $transaction->update([
-                'status' => $newStatus,
-                'gateway_response' => $data,
-            ]);
-        }
-
-        return $transaction->fresh();
+            },
+            'amount' => isset($session['amount_total']) && $currency !== null
+                ? AmountConverter::fromStripeAmount((int) $session['amount_total'], $currency)
+                : null,
+            'currency' => $currency,
+            'data' => $session,
+        ];
     }
 
     public function verifySignature(string $signature, string $rawBody): bool

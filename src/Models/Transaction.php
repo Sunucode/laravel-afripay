@@ -13,6 +13,13 @@ class Transaction extends Model
 
     protected $table = 'afripay_transactions';
 
+    /**
+     * The status the gateway reported during the last read-only verify(), never
+     * saved: lets a return page say « payment received, confirmation in progress »
+     * while the webhook remains the only path that settles the transaction.
+     */
+    public ?TransactionStatus $remoteStatus = null;
+
     protected $fillable = [
         'gateway',
         'reference',
@@ -67,6 +74,14 @@ class Transaction extends Model
     /**
      * Check if the transaction has already been processed.
      */
+    /**
+     * True when the gateway reported the payment as completed, settled or not yet.
+     */
+    public function isConfirmedByGateway(): bool
+    {
+        return $this->status === TransactionStatus::Completed || $this->remoteStatus === TransactionStatus::Completed;
+    }
+
     public function isProcessed(): bool
     {
         return $this->processed_at !== null;

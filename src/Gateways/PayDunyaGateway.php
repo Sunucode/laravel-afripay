@@ -2,13 +2,13 @@
 
 namespace SunuCode\AfriPay\Gateways;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use SunuCode\AfriPay\Contracts\SettlesFromGateway;
 use SunuCode\AfriPay\Enums\TransactionStatus;
 use SunuCode\AfriPay\Models\Transaction;
 
-class PayDunyaGateway extends AbstractGateway
+class PayDunyaGateway extends AbstractGateway implements SettlesFromGateway
 {
     public function name(): string
     {
@@ -78,11 +78,13 @@ class PayDunyaGateway extends AbstractGateway
      *
      * PayDunya POSTs `application/x-www-form-urlencoded` data nested under a
      * single `data` node: `data[status]`, `data[invoice][token]`,
-     * `data[custom_data][...]`. Callers hand over the raw request body, so the
-     * node has to be unwrapped before anything else — without it, neither the
-     * token nor the reference resolved and every IPN was silently ignored.
+     * `data[custom_data][...]`. The node is unwrapped first; a flat payload is
+     * still accepted, for callers that unwrap it themselves.
      *
-     * A flat payload is still accepted, for callers that unwrap it themselves.
+     * The IPN is not signed: its `hash` is the same for every IPN (the SHA-512 of
+     * the master key), so it proves nothing about the status or the amount it
+     * carries. The IPN only names the invoice; its status and amount are read
+     * from the confirm endpoint, and only that answer settles the transaction.
      */
     public function handleWebhook(array $data): ?Transaction
     {
@@ -93,79 +95,50 @@ class PayDunyaGateway extends AbstractGateway
         $token = $data['invoice']['token'] ?? $data['token'] ?? $data['invoice_token'] ?? null;
         $reference = $data['custom_data']['reference'] ?? null;
 
-        return DB::transaction(function () use ($data, $token, $reference) {
-            $query = Transaction::where('gateway', 'paydunya')
-                ->where('status', TransactionStatus::Pending);
+        if (! $token && ! $reference) {
+            return null;
+        }
 
-            if ($token && $reference) {
-                $query->where(function ($q) use ($token, $reference) {
-                    $q->where('gateway_reference', $token)
-                        ->orWhere('reference', $reference);
-                });
-            } elseif ($token) {
-                $query->where('gateway_reference', $token);
-            } elseif ($reference) {
-                $query->where('reference', $reference);
-            } else {
-                return null;
-            }
-
-            $transaction = $query->lockForUpdate()->first();
-
-            if (! $transaction) {
-                // Try to verify via PayDunya API
+        $transaction = Transaction::where('gateway', 'paydunya')
+            ->where(function ($q) use ($token, $reference) {
                 if ($token) {
-                    return $this->verifyByToken($token, $data);
+                    $q->orWhere('gateway_reference', $token);
                 }
+                if ($reference) {
+                    $q->orWhere('reference', $reference);
+                }
+            })
+            ->first();
 
-                return null;
-            }
-
-            $paidAmount = (float) ($data['invoice']['total_amount'] ?? $data['total_amount'] ?? 0);
-
-            $status = $data['status'] ?? $data['response_code'] ?? 'unknown';
-            $newStatus = match ($status) {
-                'completed', '00' => TransactionStatus::Completed,
-                'failed', 'cancelled' => TransactionStatus::Failed,
-                default => TransactionStatus::Pending,
-            };
-
-            if ($newStatus === TransactionStatus::Completed) {
-                return $this->completeTransaction($transaction, $data, $paidAmount);
-            }
-
-            if ($newStatus === TransactionStatus::Failed) {
-                return $this->failTransaction($transaction, $data);
-            }
-
-            return $transaction;
-        });
+        return $transaction ? $this->settle($transaction) : null;
     }
 
-    public function verify(Transaction $transaction): Transaction
+    protected function fetchStatus(Transaction $transaction): ?array
     {
-        if (! $transaction->gateway_reference || $transaction->status !== TransactionStatus::Pending) {
-            return $transaction;
+        if (! $transaction->gateway_reference) {
+            return null;
         }
 
         $response = Http::withHeaders($this->apiHeaders())
             ->get($this->baseUrl().'/checkout-invoice/confirm/'.$transaction->gateway_reference);
 
-        if ($response->successful()) {
-            $data = $response->json();
-            $newStatus = match ($data['status'] ?? 'unknown') {
+        if (! $response->successful()) {
+            return null;
+        }
+
+        $data = $response->json();
+
+        // The documentation writes « Completed » where the API answers « completed »: compared without case.
+        return [
+            'status' => match (strtolower((string) ($data['status'] ?? ''))) {
                 'completed' => TransactionStatus::Completed,
                 'failed', 'cancelled' => TransactionStatus::Failed,
                 default => TransactionStatus::Pending,
-            };
-
-            $transaction->update([
-                'status' => $newStatus,
-                'gateway_response' => $data,
-            ]);
-        }
-
-        return $transaction->fresh();
+            },
+            'amount' => isset($data['invoice']['total_amount']) ? (float) $data['invoice']['total_amount'] : null,
+            'currency' => null,
+            'data' => $data,
+        ];
     }
 
     /**
@@ -191,47 +164,6 @@ class PayDunyaGateway extends AbstractGateway
         }
 
         return hash_equals($masterKey, $signature);
-    }
-
-    private function verifyByToken(string $token, array $callbackData): ?Transaction
-    {
-        $response = Http::withHeaders($this->apiHeaders())
-            ->get($this->baseUrl().'/checkout-invoice/confirm/'.$token);
-
-        if ($response->failed()) {
-            return null;
-        }
-
-        $data = $response->json();
-        $reference = $data['custom_data']['reference'] ?? null;
-
-        if (! $reference) {
-            return null;
-        }
-
-        return DB::transaction(function () use ($reference, $callbackData, $data) {
-            $transaction = Transaction::where('reference', $reference)
-                ->where('gateway', 'paydunya')
-                ->lockForUpdate()
-                ->first();
-
-            if (! $transaction) {
-                return null;
-            }
-
-            $newStatus = match ($data['status'] ?? 'unknown') {
-                'completed' => TransactionStatus::Completed,
-                'failed', 'cancelled' => TransactionStatus::Failed,
-                default => TransactionStatus::Pending,
-            };
-
-            $transaction->update([
-                'status' => $newStatus,
-                'gateway_response' => array_merge($callbackData, $data),
-            ]);
-
-            return $transaction->fresh();
-        });
     }
 
     private function apiHeaders(): array

@@ -90,12 +90,15 @@ class PayPalGateway extends AbstractGateway
                 ->lockForUpdate()
                 ->first();
 
-            if (! $transaction || $transaction->status === TransactionStatus::Completed) {
-                return $transaction;
+            // Unknown, or already settled (by the return page too): nothing to dispatch.
+            if (! $transaction || $transaction->status !== TransactionStatus::Pending) {
+                return null;
             }
 
             // Verify and capture via PayPal API
-            return $this->verify($transaction);
+            $transaction = $this->verify($transaction);
+
+            return $transaction->status === TransactionStatus::Pending ? null : $transaction;
         });
     }
 

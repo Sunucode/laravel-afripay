@@ -3,7 +3,9 @@
 namespace SunuCode\AfriPay;
 
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Support\Facades\Log;
 use SunuCode\AfriPay\Contracts\GatewayInterface;
+use SunuCode\AfriPay\Contracts\SettlesFromGateway;
 use SunuCode\AfriPay\Enums\TransactionStatus;
 use SunuCode\AfriPay\Events\PaymentCompleted;
 use SunuCode\AfriPay\Events\PaymentFailed;
@@ -91,8 +93,9 @@ class PaymentManager
 
     /**
      * Handle an incoming webhook from a gateway.
-     * Dispatches PaymentCompleted or PaymentFailed events automatically.
-     * This is the PRIMARY path — always dispatches events.
+     * The PRIMARY path: dispatches PaymentCompleted or PaymentFailed when the
+     * transaction leaves pending, and only then: a replayed or late
+     * notification returns null and dispatches nothing.
      */
     public function handleWebhook(string $gateway, array $data): ?Transaction
     {
@@ -108,7 +111,8 @@ class PaymentManager
 
     /**
      * Verify a transaction status directly with the gateway.
-     * Read-only — NEVER dispatches events.
+     * Read-only for Wave, PayDunya and Stripe: the reported status is kept on
+     * $transaction->remoteStatus, never saved, and no event is dispatched.
      */
     public function verify(Transaction $transaction): Transaction
     {
@@ -118,28 +122,57 @@ class PaymentManager
     }
 
     /**
-     * Verify AND process: verify with gateway, then dispatch events if completed.
+     * The FALLBACK path (success URL redirect).
      *
-     * This is the FALLBACK path (success URL redirect).
-     * Behavior depends on `trust_webhook_only` config:
+     * For Wave, PayDunya, Stripe and Orange Money:
      *
-     * - true (default, recommended): verifies status but does NOT dispatch events.
-     *   The webhook is the sole source of truth. Returns the updated transaction
-     *   so your app can show a "payment received, processing..." message.
+     * - trust_webhook_only = true (default, recommended): reads the status from
+     *   the gateway without settling anything. The webhook stays the only path
+     *   that settles the transaction and dispatches PaymentCompleted; use
+     *   $transaction->isConfirmedByGateway() to show « payment received ».
      *
-     * - false: verifies AND dispatches events, same as a webhook.
-     *   Useful in development or when webhooks can't reach your server.
+     * - trust_webhook_only = false: settles the transaction the same way a
+     *   webhook does (once, under a lock) and dispatches the event. Useful in
+     *   development or when webhooks cannot reach the server.
      */
     public function verifyAndProcess(Transaction $transaction): Transaction
     {
-        $transaction = $this->verify($transaction);
+        $driver = $this->gateway($transaction->gateway);
 
-        if ($transaction->status === TransactionStatus::Completed) {
-            $trustWebhookOnly = config('afripay.trust_webhook_only', true);
-
-            if (! $trustWebhookOnly) {
-                $this->dispatchEvent($transaction);
+        if ($driver instanceof SettlesFromGateway) {
+            if (config('afripay.trust_webhook_only', true)) {
+                return $driver->verify($transaction);
             }
+
+            // Unreachable gateway: the page shows « pending », the webhook settles later.
+            try {
+                $settled = $driver->settle($transaction);
+            } catch (\Throwable $e) {
+                Log::warning('AfriPay: settlement from the return page failed', [
+                    'gateway' => $transaction->gateway,
+                    'reference' => $transaction->reference,
+                    'error' => $e->getMessage(),
+                ]);
+                $settled = null;
+            }
+
+            if ($settled) {
+                $this->dispatchEvent($settled);
+
+                return $settled;
+            }
+
+            return $transaction->fresh() ?? $transaction;
+        }
+
+        // PayPal captures on return and PayTech has no status check: they keep
+        // their former behaviour, and the event goes out when the return page is
+        // the one that settled the payment (the late webhook then dispatches nothing).
+        $wasPending = $transaction->status === TransactionStatus::Pending;
+        $transaction = $driver->verify($transaction);
+
+        if ($wasPending && $transaction->status !== TransactionStatus::Pending) {
+            $this->dispatchEvent($transaction);
         }
 
         return $transaction;

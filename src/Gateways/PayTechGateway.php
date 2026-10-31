@@ -102,8 +102,9 @@ class PayTechGateway extends AbstractGateway
                 ->lockForUpdate()
                 ->first();
 
-            if (! $transaction || $transaction->status === TransactionStatus::Completed) {
-                return $transaction;
+            // Unknown, or already settled: a replay dispatches nothing.
+            if (! $transaction || $transaction->status !== TransactionStatus::Pending) {
+                return null;
             }
 
             if ($typeEvent === 'sale_complete') {
@@ -116,7 +117,7 @@ class PayTechGateway extends AbstractGateway
                 return $this->failTransaction($transaction, $data);
             }
 
-            return $transaction;
+            return null;
         });
     }
 

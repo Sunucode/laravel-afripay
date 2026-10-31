@@ -63,25 +63,144 @@ abstract class AbstractGateway implements GatewayInterface
     }
 
     /**
+     * Ask the gateway for the current state of a transaction, without saving
+     * anything. Gateways that support a read-only status check override it.
+     *
+     * @return array{status: TransactionStatus, amount: ?float, currency: ?string, data: array}|null
+     */
+    protected function fetchStatus(Transaction $transaction): ?array
+    {
+        return null;
+    }
+
+    /**
+     * Read-only by default: the reported status is kept on the instance, never
+     * saved, so a return page can never settle a payment the webhook has not.
+     */
+    public function verify(Transaction $transaction): Transaction
+    {
+        if ($transaction->status !== TransactionStatus::Pending) {
+            return $transaction;
+        }
+
+        // A return page must not break when the gateway is unreachable: the
+        // status stays unknown and the webhook settles the payment later.
+        try {
+            $remote = $this->fetchStatus($transaction);
+        } catch (\Throwable $e) {
+            Log::warning('AfriPay: status check failed', [
+                'gateway' => $this->name(),
+                'reference' => $transaction->reference,
+                'error' => $e->getMessage(),
+            ]);
+            $remote = null;
+        }
+
+        $transaction->remoteStatus = $remote['status'] ?? null;
+
+        return $transaction;
+    }
+
+    /**
+     * Ask the gateway and settle the transaction if it is still pending.
+     */
+    public function settle(Transaction $transaction): ?Transaction
+    {
+        $remote = $this->fetchStatus($transaction);
+
+        if ($remote === null || $remote['status'] === TransactionStatus::Pending) {
+            return null;
+        }
+
+        return $this->transition($transaction->reference, $remote['status'], $remote['data'], $remote['amount'], $remote['currency']);
+    }
+
+    /**
+     * The only way a transaction leaves pending: under a lock, once. A completed
+     * payment whose amount or currency does not match the expected one fails.
+     * Returns the transaction only when its status changed, so a replayed or late
+     * notification never dispatches a second event.
+     */
+    protected function transition(?string $reference, TransactionStatus $to, array $data, ?float $paidAmount = null, ?string $paidCurrency = null, ?string $gatewayReference = null): ?Transaction
+    {
+        if ($reference === null || $reference === '' || $to === TransactionStatus::Pending) {
+            return null;
+        }
+
+        return DB::transaction(function () use ($reference, $to, $data, $paidAmount, $paidCurrency, $gatewayReference) {
+            $transaction = Transaction::where('gateway', $this->name())
+                ->where('reference', $reference)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $transaction || $transaction->status !== TransactionStatus::Pending) {
+                return null;
+            }
+
+            if ($to === TransactionStatus::Completed && ! $this->paidAsExpected($transaction, $paidAmount, $paidCurrency)) {
+                $to = TransactionStatus::Failed;
+            }
+
+            $transaction->update(array_filter([
+                'status' => $to,
+                'gateway_response' => $data,
+                'gateway_reference' => $gatewayReference,
+            ], fn ($value) => $value !== null));
+
+            return $transaction->fresh();
+        });
+    }
+
+    /**
+     * A completed payment must carry its amount; its currency, when given, must
+     * be the transaction's. Missing amount: the payment is not accepted.
+     */
+    protected function paidAsExpected(Transaction $transaction, ?float $paidAmount, ?string $paidCurrency): bool
+    {
+        if ($paidAmount === null || ! AmountConverter::amountsMatch((float) $transaction->amount, $paidAmount)) {
+            Log::warning('AfriPay: amount missing or mismatched', [
+                'expected' => $transaction->amount,
+                'received' => $paidAmount,
+                'reference' => $transaction->reference,
+                'gateway' => $this->name(),
+            ]);
+
+            return false;
+        }
+
+        if ($paidCurrency !== null && strtoupper($paidCurrency) !== strtoupper((string) $transaction->currency)) {
+            Log::warning('AfriPay: currency mismatched', [
+                'expected' => $transaction->currency,
+                'received' => $paidCurrency,
+                'reference' => $transaction->reference,
+                'gateway' => $this->name(),
+            ]);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Find a pending transaction and lock it for processing.
      */
     protected function findAndLock(string $reference, ?string $gatewayRef = null): ?Transaction
     {
-        return DB::transaction(function () use ($reference, $gatewayRef) {
-            $query = Transaction::where('gateway', $this->name())
-                ->where('status', TransactionStatus::Pending);
+        $query = Transaction::where('gateway', $this->name())
+            ->where('status', TransactionStatus::Pending);
 
-            if ($gatewayRef) {
-                $query->where(function ($q) use ($reference, $gatewayRef) {
-                    $q->where('reference', $reference)
-                        ->orWhere('gateway_reference', $gatewayRef);
-                });
-            } else {
-                $query->where('reference', $reference);
-            }
+        if ($gatewayRef) {
+            $query->where(function ($q) use ($reference, $gatewayRef) {
+                $q->where('reference', $reference)
+                    ->orWhere('gateway_reference', $gatewayRef);
+            });
+        } else {
+            $query->where('reference', $reference);
+        }
 
-            return $query->lockForUpdate()->first();
-        });
+        // Call inside a DB transaction: the lock lasts until it commits.
+        return $query->lockForUpdate()->first();
     }
 
     /**

@@ -97,7 +97,7 @@ return [
         | Wave (Senegal, Ivory Coast, Mali, Burkina Faso)
         |----------------------------------------------------------------------
         | Mobile money — dominant in West Africa.
-        | No sandbox available — uses 5 XOF in local/testing mode.
+        | No sandbox available — set WAVE_TEST_AMOUNT to charge a small amount while testing.
         | WAVE_API_SECRET is OPTIONAL:
         | - leave empty if Request Signing is disabled on your Wave API key
         | - set it only if Request Signing is enabled
@@ -111,6 +111,9 @@ return [
             'api_secret' => env('WAVE_API_SECRET'),
             'webhook_secret' => env('WAVE_WEBHOOK_SECRET'),
             'base_url' => env('WAVE_BASE_URL', 'https://api.wave.com/v1'),
+            // Wave has no sandbox: set a small amount (e.g. 5) to charge it instead of the
+            // real price while testing. Empty: the real price is charged, whatever the environment.
+            'test_amount' => env('WAVE_TEST_AMOUNT'),
         ],
 
         /*
@@ -160,6 +163,10 @@ return [
             'merchant_key' => env('ORANGE_MONEY_MERCHANT_KEY'),
             'base_url' => env('ORANGE_MONEY_BASE_URL', 'https://api.orange.com'),
             'auth_header' => env('ORANGE_MONEY_AUTH_HEADER'),
+            // Sandbox: orange-money-webpay/dev/v1 and OUV. Production: the
+            // country path given by Orange (e.g. orange-money-webpay/sn/v1) and XOF.
+            'api_path' => env('ORANGE_MONEY_API_PATH', 'orange-money-webpay/dev/v1'),
+            'currency' => env('ORANGE_MONEY_CURRENCY', 'OUV'),
         ],
 
         /*

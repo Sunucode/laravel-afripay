@@ -10,15 +10,16 @@ class AfriPayController extends Controller
 {
     /**
      * L'utilisateur revient après un paiement réussi.
-     * On appelle verifyAndProcess() pour confirmer le paiement
-     * au cas où le webhook n'est pas encore arrivé.
+     * verifyAndProcess() interroge la passerelle si le webhook n'est pas encore
+     * arrivé ; avec trust_webhook_only (défaut), seul le webhook règle le paiement
+     * et déclenche PaymentCompleted : la page affiche ce que la passerelle confirme.
      */
     public function success(string $reference)
     {
         $transaction = AfriPayTransaction::where('reference', $reference)->firstOrFail();
         $transaction = AfriPay::verifyAndProcess($transaction);
 
-        if ($transaction->status->isCompleted()) {
+        if ($transaction->isConfirmedByGateway()) {
             return view('payment.success', compact('transaction'));
         }
 
