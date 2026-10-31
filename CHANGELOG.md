@@ -1,8 +1,12 @@
 # Changelog
 
-## 1.1.0
+## 2.0.0
 
-Correctifs de fiabilité des paiements. Mise à jour sans changement de code pour la plupart des projets ; lire « À vérifier » avant de monter.
+Correctifs de fiabilité des paiements. Version majeure parce que `verify()` ne modifie plus la transaction : un projet en `^1.0` ne la reçoit pas sans le vouloir. Lire « À vérifier » avant de passer en `^2.0`.
+
+### Changement incompatible
+
+- **`verify()` est en lecture seule** pour Wave, PayDunya, Stripe et Orange Money. Le code qui appelait `AfriPay::verify($transaction)` puis lisait `$transaction->status` pour savoir si le paiement est reçu doit lire `$transaction->isConfirmedByGateway()` (ou `$transaction->remoteStatus`). Pour régler la transaction depuis la page de retour, appeler `verifyAndProcess()` avec `AFRIPAY_TRUST_WEBHOOK_ONLY=false`.
 
 ### Corrigé
 
