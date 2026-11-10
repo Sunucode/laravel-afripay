@@ -7,6 +7,29 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use SunuCode\AfriPay\Enums\TransactionStatus;
 
+/**
+ * A payment, from the moment it is opened to the moment it settles.
+ *
+ * The properties are declared because static analysis cannot read a migration:
+ * a host project running Larastan sees `$transaction->status` as undefined and
+ * fails its own build on our model.
+ *
+ * @property int $id
+ * @property string $gateway
+ * @property string|null $reference
+ * @property string|null $gateway_reference
+ * @property numeric-string $amount
+ * @property string $currency
+ * @property TransactionStatus $status
+ * @property array<string, mixed>|null $gateway_response
+ * @property array<string, mixed>|null $metadata
+ * @property string|null $payable_type
+ * @property int|null $payable_id
+ * @property \Illuminate\Support\Carbon|null $processed_at
+ * @property \Illuminate\Support\Carbon|null $created_at
+ * @property \Illuminate\Support\Carbon|null $updated_at
+ * @property \Illuminate\Support\Carbon|null $deleted_at
+ */
 class Transaction extends Model
 {
     use SoftDeletes;

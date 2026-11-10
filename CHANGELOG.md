@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.1
+
+### Corrigé
+
+- **Propriétés déclarées sur .** L'analyse statique ne lit pas une migration : un projet hôte sous Larastan voyait `$transaction->status` comme une propriété inexistante et échouait sa propre analyse sur notre modèle. Docblocs seulement, aucun changement d'exécution.
+
 ## 2.1.0
 
 Prélever une carte enregistrée, sans le client. Version mineure : rien ne change pour les projets qui n'en veulent pas.
