@@ -433,3 +433,14 @@ it('does not accept a dollar of difference on a usd settlement', function () {
         ->and(AmountConverter::amountsMatch(10.00, 10.00, null, 'usd'))->toBeTrue()
         ->and(AmountConverter::amountsMatch(12000.0, 11999.0, null, 'xof'))->toBeTrue();
 });
+
+it('still removes the card locally when the gateway cannot be reached', function () {
+    // Le client a demandé le retrait : une passerelle injoignable ne doit pas
+    // l'en empêcher. L'échec se signale par la valeur de retour.
+    Http::fake(fn () => throw new \Illuminate\Http\Client\ConnectionException('timeout'));
+
+    $method = savedCard();
+
+    expect(app(PaymentManager::class)->forgetSavedMethod($method))->toBeFalse()
+        ->and(PaymentMethod::find($method->id))->toBeNull();
+});

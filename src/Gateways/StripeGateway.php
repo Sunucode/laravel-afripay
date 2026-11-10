@@ -308,9 +308,21 @@ class StripeGateway extends AbstractGateway implements ChargesOffSession, Settle
 
     public function detachSavedMethod(PaymentMethod $method): bool
     {
-        $response = $this->stripe()->post(
-            "https://api.stripe.com/v1/payment_methods/{$method->gateway_method_id}/detach"
-        );
+        // Le contrat promet un booléen, jamais une exception : le client a
+        // demandé le retrait de sa carte, et une passerelle injoignable ne
+        // doit pas l'en empêcher. L'échec se signale par la valeur de retour,
+        // et l'appelant décide quoi en faire.
+        try {
+            $response = $this->stripe()->post(
+                "https://api.stripe.com/v1/payment_methods/{$method->gateway_method_id}/detach"
+            );
+        } catch (\Throwable $e) {
+            Log::warning('AfriPay Stripe: payment method detach unreachable', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
 
         if ($response->successful()) {
             return true;
