@@ -4,7 +4,7 @@
 
 ### Corrigé
 
-- **Propriétés déclarées sur .** L'analyse statique ne lit pas une migration : un projet hôte sous Larastan voyait `$transaction->status` comme une propriété inexistante et échouait sa propre analyse sur notre modèle. Docblocs seulement, aucun changement d'exécution.
+- **Propriétés déclarées sur le modèle Transaction.** L'analyse statique ne lit pas une migration : un projet hôte sous Larastan voyait `$transaction->status` comme une propriété inexistante et échouait sa propre analyse sur notre modèle. Docblocs seulement, aucun changement d'exécution.
 
 ## 2.1.0
 
