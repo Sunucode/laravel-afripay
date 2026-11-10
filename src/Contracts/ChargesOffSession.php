@@ -65,4 +65,13 @@ interface ChargesOffSession
      *         the bank asks for the customer, who must then be brought back.
      */
     public function chargeSaved(PaymentMethod $method, array $params): Transaction;
+
+    /**
+     * Detach a stored payment method at the gateway.
+     *
+     * Returns false when the gateway refused or could not be reached, so the
+     * caller can tell a card that is really gone from one that only looks
+     * gone locally. Detaching one the gateway no longer knows counts as done.
+     */
+    public function detachSavedMethod(PaymentMethod $method): bool;
 }

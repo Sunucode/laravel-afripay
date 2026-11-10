@@ -143,7 +143,7 @@ abstract class AbstractGateway implements GatewayInterface
 
             $transaction->update(array_filter([
                 'status' => $to,
-                'gateway_response' => $data,
+                'gateway_response' => $this->safeLog($data),
                 'gateway_reference' => $gatewayReference,
             ], fn ($value) => $value !== null));
 
@@ -210,7 +210,7 @@ abstract class AbstractGateway implements GatewayInterface
     {
         // Verify amount if provided
         if ($paidAmount !== null && $paidAmount > 0) {
-            if (! AmountConverter::amountsMatch((float) $transaction->amount, $paidAmount)) {
+            if (! AmountConverter::amountsMatch((float) $transaction->amount, $paidAmount, null, (string) $transaction->currency)) {
                 Log::warning('AfriPay: amount mismatch', [
                     'expected' => $transaction->amount,
                     'received' => $paidAmount,
@@ -220,7 +220,7 @@ abstract class AbstractGateway implements GatewayInterface
 
                 $transaction->update([
                     'status' => TransactionStatus::Failed,
-                    'gateway_response' => $webhookData,
+                    'gateway_response' => $this->safeLog($webhookData),
                 ]);
 
                 return $transaction->fresh();
@@ -229,7 +229,7 @@ abstract class AbstractGateway implements GatewayInterface
 
         $transaction->update([
             'status' => TransactionStatus::Completed,
-            'gateway_response' => $webhookData,
+            'gateway_response' => $this->safeLog($webhookData),
         ]);
 
         return $transaction->fresh();
@@ -242,7 +242,7 @@ abstract class AbstractGateway implements GatewayInterface
     {
         $transaction->update([
             'status' => TransactionStatus::Failed,
-            'gateway_response' => $data,
+            'gateway_response' => $this->safeLog($data),
         ]);
 
         return $transaction->fresh();
@@ -253,8 +253,12 @@ abstract class AbstractGateway implements GatewayInterface
      */
     protected function safeLog(array $data): array
     {
+        // `client_secret` autorise a confirmer un paiement cote navigateur :
+        // conserve en clair dans gateway_response et dans les journaux de
+        // webhook, il y restait lisible par tout acces en lecture a la base.
         $redacted = ['card', 'card_number', 'cvv', 'cvc', 'password', 'secret',
-            'account_number', 'phone_number', 'token', 'access_token'];
+            'account_number', 'phone_number', 'token', 'access_token',
+            'client_secret', 'payment_method_details'];
 
         return collect($data)->map(function ($value, $key) use ($redacted) {
             if (in_array(strtolower($key), $redacted)) {

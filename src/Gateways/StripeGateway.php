@@ -144,6 +144,15 @@ class StripeGateway extends AbstractGateway implements ChargesOffSession, Settle
      */
     public function confirmSavedMethod(string $gatewayReference, ?Model $payable = null, ?string $expectedReference = null): ?PaymentMethod
     {
+        // L'identifiant vient d'une URL publique et part dans un appel API :
+        // on vérifie sa forme avant de l'interpoler, plutôt que de laisser une
+        // chaîne quelconque atteindre Stripe.
+        if (! preg_match('/^cs_[A-Za-z0-9_]{1,250}$/', $gatewayReference)) {
+            Log::warning('AfriPay Stripe: malformed setup session id');
+
+            return null;
+        }
+
         $response = $this->stripe()->get("https://api.stripe.com/v1/checkout/sessions/{$gatewayReference}", [
             'expand' => ['setup_intent.payment_method'],
         ]);
@@ -193,6 +202,16 @@ class StripeGateway extends AbstractGateway implements ChargesOffSession, Settle
         }
 
         $card = is_array($method) ? (array) ($method['card'] ?? []) : [];
+
+        // Une carte retirée puis réenregistrée : la ligne existe encore, en
+        // suppression douce, et l'index unique porte sur (gateway,
+        // gateway_method_id). updateOrCreate ignore les lignes supprimées, il
+        // tenterait donc une insertion que la base refuse, et la page de
+        // retour rendrait une 500 au client au lieu d'enregistrer sa carte.
+        PaymentMethod::onlyTrashed()
+            ->where('gateway', $this->name())
+            ->where('gateway_method_id', $methodId)
+            ->restore();
 
         return PaymentMethod::updateOrCreate(
             ['gateway' => $this->name(), 'gateway_method_id' => $methodId],
@@ -253,7 +272,14 @@ class StripeGateway extends AbstractGateway implements ChargesOffSession, Settle
         $transaction->update(['gateway_reference' => $body['id'] ?? ($body['error']['payment_intent']['id'] ?? null)]);
 
         if ($response->successful() && ($body['status'] ?? null) === 'succeeded') {
-            return $this->completeTransaction($transaction, $body, $amount);
+            // Le montant que Stripe confirme, pas celui qu'on lui a demandé.
+            // Passer $amount revenait a comparer la transaction a elle-meme :
+            // le controle existait mais ne pouvait jamais echouer.
+            $encaisse = isset($body['amount_received']) || isset($body['amount'])
+                ? AmountConverter::fromStripeAmount((int) ($body['amount_received'] ?? $body['amount']), $currency)
+                : null;
+
+            return $this->completeTransaction($transaction, $body, $encaisse);
         }
 
         if (($body['error']['code'] ?? null) === 'authentication_required') {
@@ -278,6 +304,29 @@ class StripeGateway extends AbstractGateway implements ChargesOffSession, Settle
         ]);
 
         return $failed;
+    }
+
+    public function detachSavedMethod(PaymentMethod $method): bool
+    {
+        $response = $this->stripe()->post(
+            "https://api.stripe.com/v1/payment_methods/{$method->gateway_method_id}/detach"
+        );
+
+        if ($response->successful()) {
+            return true;
+        }
+
+        // Déjà détachée, ou inconnue : le but est atteint.
+        if ($response->status() === 404 || ($response->json('error.code') === 'resource_missing')) {
+            return true;
+        }
+
+        Log::warning('AfriPay Stripe: payment method not detached', [
+            'status' => $response->status(),
+            'body' => $this->safeLog((array) $response->json()),
+        ]);
+
+        return false;
     }
 
     /**

@@ -49,10 +49,18 @@ class AmountConverter
     }
 
     /**
-     * Check if two amounts match within a tolerance (default ±1 unit).
+     * Check if two amounts match within a tolerance.
+     *
+     * The tolerance follows the currency when none is given. A flat ±1 meant
+     * one franc on XOF, which is right, but a whole dollar on USD: at the
+     * rates this package is used with, that is some 600 CFA francs of
+     * difference silently accepted on a settlement. One minor unit is the
+     * correct allowance everywhere, and it only exists to absorb rounding.
      */
-    public static function amountsMatch(float $expected, float $received, float $tolerance = 1.0): bool
+    public static function amountsMatch(float $expected, float $received, ?float $tolerance = null, string $currency = 'xof'): bool
     {
+        $tolerance ??= self::isZeroDecimal($currency) ? 1.0 : 0.01;
+
         return abs($expected - $received) <= $tolerance;
     }
 }

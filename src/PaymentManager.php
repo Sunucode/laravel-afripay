@@ -239,7 +239,34 @@ class PaymentManager
      */
     public function chargeSaved(PaymentMethod $method, array $params): Transaction
     {
-        return $this->offSessionDriver($method->gateway)->chargeSaved($method, $params);
+        $transaction = $this->offSessionDriver($method->gateway)->chargeSaved($method, $params);
+
+        // Comme tous les autres chemins de règlement. C'était le seul à ne
+        // rien émettre : un prélèvement hors session abouti ne déclenchait
+        // aucun PaymentCompleted, alors que le contrat de ChargesOffSession
+        // annonce précisément de quoi facturer un abonnement.
+        $this->dispatchEvent($transaction);
+
+        return $transaction;
+    }
+
+    /**
+     * Stop charging a stored payment method, at the gateway too.
+     *
+     * Deleting the local row is not enough: the card stays attached to the
+     * customer at the gateway, so it keeps appearing on their side and can
+     * still be charged by anything else holding its handles. The customer is
+     * told automatic payment is off, which would not be the whole truth.
+     */
+    public function forgetSavedMethod(PaymentMethod $method): bool
+    {
+        $driver = $this->offSessionDriver($method->gateway);
+
+        $detached = $driver->detachSavedMethod($method);
+
+        $method->delete();
+
+        return $detached;
     }
 
     /**

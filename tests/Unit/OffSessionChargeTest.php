@@ -1,7 +1,10 @@
 <?php
 
 use Illuminate\Support\Facades\Http;
+use SunuCode\AfriPay\Support\AmountConverter;
+use Illuminate\Support\Facades\Event;
 use SunuCode\AfriPay\Enums\TransactionStatus;
+use SunuCode\AfriPay\Events\PaymentCompleted;
 use SunuCode\AfriPay\Exceptions\RequiresCustomerAuthentication;
 use SunuCode\AfriPay\Models\PaymentMethod;
 use SunuCode\AfriPay\PaymentManager;
@@ -359,4 +362,74 @@ it('asks the right endpoint when verifying an off-session charge', function () {
     app(PaymentManager::class)->verify(pendingOffSession('OS-4', 'pi_4'));
 
     Http::assertSent(fn ($request) => str_contains($request->url(), '/payment_intents/pi_4'));
+});
+
+it('refuses a malformed session id before calling the gateway', function () {
+    Http::fake();
+
+    expect(app(PaymentManager::class)->confirmSavedMethod('../../admin', null, 'stripe'))->toBeNull();
+
+    Http::assertNothingSent();
+});
+
+it('brings back a card that was removed and authorised again', function () {
+    Http::fake(['api.stripe.com/v1/checkout/sessions/*' => Http::response(setupSession())]);
+
+    $first = app(PaymentManager::class)->confirmSavedMethod('cs_setup_1', null, 'stripe');
+    $first->delete();
+
+    // Le retrait est une suppression douce, et l'index unique porte sur
+    // (gateway, gateway_method_id) : sans restauration, updateOrCreate
+    // tenterait une insertion que la base refuse, et la page de retour
+    // rendrait une 500 au lieu d'enregistrer la carte.
+    $again = app(PaymentManager::class)->confirmSavedMethod('cs_setup_1', null, 'stripe');
+
+    expect($again)->not->toBeNull()
+        ->and($again->id)->toBe($first->id)
+        ->and(PaymentMethod::count())->toBe(1);
+});
+
+it('detaches the card at the gateway when it is forgotten', function () {
+    Http::fake(['api.stripe.com/v1/payment_methods/*/detach' => Http::response(['id' => 'pm_123'])]);
+
+    $method = savedCard();
+
+    expect(app(PaymentManager::class)->forgetSavedMethod($method))->toBeTrue()
+        ->and(PaymentMethod::find($method->id))->toBeNull();
+
+    // Supprimer la ligne ne suffit pas : la carte resterait attachee au client
+    // chez Stripe, donc visible et prelevable, alors qu'on annonce au client
+    // que le prelevement automatique est coupe.
+    Http::assertSent(fn ($r) => str_contains($r->url(), '/payment_methods/pm_123/detach'));
+});
+
+it('emits PaymentCompleted after a successful off-session charge', function () {
+    Event::fake();
+    Http::fake(['api.stripe.com/v1/payment_intents' => Http::response([
+        'id' => 'pi_ev', 'status' => 'succeeded', 'amount' => 12000, 'currency' => 'xof',
+    ])]);
+
+    app(PaymentManager::class)->chargeSaved(savedCard(), ['amount' => 12000.0, 'currency' => 'XOF']);
+
+    Event::assertDispatched(PaymentCompleted::class);
+});
+
+it('refuses a settlement whose amount is not the one charged', function () {
+    // Le controle comparait la transaction a elle-meme : il ne pouvait pas
+    // echouer. Il porte desormais sur ce que Stripe confirme.
+    Http::fake(['api.stripe.com/v1/payment_intents' => Http::response([
+        'id' => 'pi_short', 'status' => 'succeeded', 'amount' => 9000, 'currency' => 'xof',
+    ])]);
+
+    $transaction = app(PaymentManager::class)->chargeSaved(savedCard(), ['amount' => 12000.0, 'currency' => 'XOF']);
+
+    expect($transaction->status)->toBe(TransactionStatus::Failed);
+});
+
+it('does not accept a dollar of difference on a usd settlement', function () {
+    // Une tolerance plate de 1 valait un dollar entier, soit environ 600 F
+    // aux taux employes ici, accepte en silence sur un reglement.
+    expect(AmountConverter::amountsMatch(10.00, 9.50, null, 'usd'))->toBeFalse()
+        ->and(AmountConverter::amountsMatch(10.00, 10.00, null, 'usd'))->toBeTrue()
+        ->and(AmountConverter::amountsMatch(12000.0, 11999.0, null, 'xof'))->toBeTrue();
 });
