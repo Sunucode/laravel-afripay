@@ -42,8 +42,13 @@ interface ChargesOffSession
      *
      * Returns null when the authorisation is not complete, so a return page
      * opened too early, or opened twice, cannot store anything wrong.
+     *
+     * `$expectedReference` is the reference `startSavingMethod()` returned, and
+     * guards against a replayed session id: the id travels in the return URL,
+     * and whoever holds it could otherwise claim the card it authorised.
+     * Returns null when it does not match the session.
      */
-    public function confirmSavedMethod(string $gatewayReference, ?Model $payable = null): ?PaymentMethod;
+    public function confirmSavedMethod(string $gatewayReference, ?Model $payable = null, ?string $expectedReference = null): ?PaymentMethod;
 
     /**
      * Charge a stored payment method, without the customer.

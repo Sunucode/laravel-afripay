@@ -216,10 +216,18 @@ class PaymentManager
     /**
      * Keep the handles from a finished authorisation. Null while it is not
      * complete.
+     *
+     * `$expectedReference` is the reference `startSavingMethod()` returned. A
+     * session id travels in a URL, so it reaches browser history, server logs
+     * and anyone the customer forwards the link to. Without this check, that
+     * id is the only thing needed to claim the card it authorised: replaying
+     * it from another account attaches someone else's card to that account.
+     * Pass the reference you stored when you opened the session, and a
+     * replayed id is refused.
      */
-    public function confirmSavedMethod(string $gatewayReference, ?Model $payable = null, ?string $gateway = null): ?PaymentMethod
+    public function confirmSavedMethod(string $gatewayReference, ?Model $payable = null, ?string $gateway = null, ?string $expectedReference = null): ?PaymentMethod
     {
-        return $this->offSessionDriver($gateway)->confirmSavedMethod($gatewayReference, $payable);
+        return $this->offSessionDriver($gateway)->confirmSavedMethod($gatewayReference, $payable, $expectedReference);
     }
 
     /**

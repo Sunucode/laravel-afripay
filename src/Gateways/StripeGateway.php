@@ -142,7 +142,7 @@ class StripeGateway extends AbstractGateway implements ChargesOffSession, Settle
      * than making a second one, because the same card authorised twice is
      * still one card.
      */
-    public function confirmSavedMethod(string $gatewayReference, ?Model $payable = null): ?PaymentMethod
+    public function confirmSavedMethod(string $gatewayReference, ?Model $payable = null, ?string $expectedReference = null): ?PaymentMethod
     {
         $response = $this->stripe()->get("https://api.stripe.com/v1/checkout/sessions/{$gatewayReference}", [
             'expand' => ['setup_intent.payment_method'],
@@ -152,6 +152,19 @@ class StripeGateway extends AbstractGateway implements ChargesOffSession, Settle
             Log::error('AfriPay Stripe: setup session unreadable', [
                 'status' => $response->status(),
                 'body' => $this->safeLog((array) $response->json()),
+            ]);
+
+            return null;
+        }
+
+        // Le client_reference_id est pose par startSavingMethod et n'est pas
+        // devinable : il est la preuve que cette session est bien celle que
+        // l'appelant a ouverte. Sans ce controle, l'identifiant de session,
+        // qui voyage en clair dans l'URL de retour, suffirait a revendiquer la
+        // carte d'un autre.
+        if ($expectedReference !== null && (string) $response->json('client_reference_id') !== $expectedReference) {
+            Log::warning('AfriPay Stripe: setup session does not match the expected reference', [
+                'session' => $gatewayReference,
             ]);
 
             return null;
@@ -217,16 +230,23 @@ class StripeGateway extends AbstractGateway implements ChargesOffSession, Settle
             'currency' => strtoupper($currency),
         ]));
 
-        $response = $this->stripe()->post('https://api.stripe.com/v1/payment_intents', $this->flattenForStripe([
-            'amount' => AmountConverter::toStripeAmount($amount, $currency),
-            'currency' => $currency,
-            'customer' => $method->gateway_customer_id,
-            'payment_method' => $method->gateway_method_id,
-            'off_session' => 'true',
-            'confirm' => 'true',
-            'description' => $params['description'] ?? config('app.name', 'AfriPay').' usage',
-            'metadata' => array_merge(['reference' => $reference], $params['metadata'] ?? []),
-        ]));
+        // La cle d'idempotence est la reference : elle est stable pour cette
+        // tentative, et Stripe renvoie alors le meme PaymentIntent au lieu
+        // d'en creer un second. Sans elle, un timeout survenu apres le debit
+        // laisse l'appelant croire a un echec, et la tentative suivante
+        // debite une seconde fois.
+        $response = $this->stripe()
+            ->withHeaders(['Idempotency-Key' => $reference])
+            ->post('https://api.stripe.com/v1/payment_intents', $this->flattenForStripe([
+                'amount' => AmountConverter::toStripeAmount($amount, $currency),
+                'currency' => $currency,
+                'customer' => $method->gateway_customer_id,
+                'payment_method' => $method->gateway_method_id,
+                'off_session' => 'true',
+                'confirm' => 'true',
+                'description' => $params['description'] ?? config('app.name', 'AfriPay').' usage',
+                'metadata' => array_merge(['reference' => $reference], $params['metadata'] ?? []),
+            ]));
 
         $body = (array) $response->json();
 
@@ -236,14 +256,21 @@ class StripeGateway extends AbstractGateway implements ChargesOffSession, Settle
             return $this->completeTransaction($transaction, $body, $amount);
         }
 
-        $failed = $this->failTransaction($transaction, $body);
-
         if (($body['error']['code'] ?? null) === 'authentication_required') {
+            // La transaction reste `pending`, et c'est tout l'enjeu : le
+            // paiement n'est pas fini, il attend le client. La marquer en
+            // echec ici la rendrait inreglable, parce que transition() ignore
+            // tout ce qui n'est plus `pending` : le webhook
+            // `payment_intent.succeeded` qui suit la confirmation 3DS ne
+            // reglerait rien, l'ardoise resterait entiere, et le client serait
+            // debite une seconde fois au declencheur suivant.
             throw new RequiresCustomerAuthentication(
-                $failed,
+                $transaction,
                 $body['error']['payment_intent']['next_action']['redirect_to_url']['url'] ?? null,
             );
         }
+
+        $failed = $this->failTransaction($transaction, $body);
 
         Log::warning('AfriPay Stripe: off-session charge refused', [
             'reference' => $reference,

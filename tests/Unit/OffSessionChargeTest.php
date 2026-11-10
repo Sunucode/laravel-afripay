@@ -128,6 +128,31 @@ it('does not make a second row for the same card authorised twice', function () 
     expect(PaymentMethod::count())->toBe(1);
 });
 
+it('refuses a session whose reference is not the expected one', function () {
+    // L'identifiant de session voyage dans l'URL de retour : il atteint
+    // l'historique du navigateur et les journaux. Sans ce contrôle, le
+    // rejouer suffisait à revendiquer la carte qu'il avait autorisée.
+    Http::fake(['api.stripe.com/v1/checkout/sessions/*' => Http::response(
+        array_merge(setupSession(), ['client_reference_id' => 'SM-DE-QUELQU-UN-DAUTRE'])
+    )]);
+
+    $method = app(PaymentManager::class)->confirmSavedMethod('cs_setup_1', null, 'stripe', 'SM-LA-MIENNE');
+
+    expect($method)->toBeNull()
+        ->and(PaymentMethod::count())->toBe(0);
+});
+
+it('keeps the card when the reference is the expected one', function () {
+    Http::fake(['api.stripe.com/v1/checkout/sessions/*' => Http::response(
+        array_merge(setupSession(), ['client_reference_id' => 'SM-LA-MIENNE'])
+    )]);
+
+    $method = app(PaymentManager::class)->confirmSavedMethod('cs_setup_1', null, 'stripe', 'SM-LA-MIENNE');
+
+    expect($method)->not->toBeNull()
+        ->and($method->gateway_method_id)->toBe('pm_123');
+});
+
 // --- Prélever -------------------------------------------------------------
 
 it('charges a stored card and settles the transaction', function () {
@@ -159,10 +184,74 @@ it('stops instead of retrying when the issuer wants the customer', function () {
         app(PaymentManager::class)->chargeSaved(savedCard(), ['amount' => 12000.0, 'currency' => 'XOF']);
         $this->fail('L\'exception d\'authentification aurait dû être levée.');
     } catch (RequiresCustomerAuthentication $e) {
+        // `pending`, et non `failed` : le paiement n'est pas refusé, il attend
+        // le client. C'est `transition()` qui l'impose, puisqu'il ignore tout
+        // ce qui n'est plus `pending` : marquée en échec, la transaction
+        // n'aurait plus jamais pu être réglée par le webhook qui suit la
+        // confirmation 3DS. Le client payait, son ardoise restait entière, et
+        // le déclencheur suivant le débitait une seconde fois.
         expect($e->redirectUrl)->toBe('https://stripe.test/3ds')
-            ->and($e->transaction->status)->toBe(TransactionStatus::Failed)
+            ->and($e->transaction->status)->toBe(TransactionStatus::Pending)
             ->and($e->transaction->gateway_reference)->toBe('pi_auth');
     }
+});
+
+it('settles a 3DS payment from the webhook that follows it', function () {
+    Http::fake(['api.stripe.com/v1/payment_intents' => Http::response([
+        'error' => [
+            'code' => 'authentication_required',
+            'payment_intent' => [
+                'id' => 'pi_sca',
+                'next_action' => ['redirect_to_url' => ['url' => 'https://stripe.test/3ds']],
+            ],
+        ],
+    ], 402)]);
+
+    $manager = app(PaymentManager::class);
+
+    try {
+        $manager->chargeSaved(savedCard(), [
+            'amount' => 12000.0,
+            'currency' => 'XOF',
+            'reference' => 'OS-SCA-1',
+        ]);
+    } catch (RequiresCustomerAuthentication) {
+        // Attendu : le client doit confirmer chez sa banque.
+    }
+
+    // Ce que Stripe envoie une fois le client revenu de la page 3DS.
+    $settled = $manager->handleWebhook('stripe', [
+        'type' => 'payment_intent.succeeded',
+        'data' => ['object' => [
+            'id' => 'pi_sca',
+            'object' => 'payment_intent',
+            'status' => 'succeeded',
+            // XOF n'a pas de sous-unité : le montant Stripe est le montant.
+            'amount' => 12000,
+            'currency' => 'xof',
+            'metadata' => ['reference' => 'OS-SCA-1'],
+        ]],
+    ]);
+
+    expect($settled)->not->toBeNull()
+        ->and($settled->status)->toBe(TransactionStatus::Completed);
+});
+
+it('carries an idempotency key so a timeout cannot charge twice', function () {
+    Http::fake(['api.stripe.com/v1/payment_intents' => Http::response([
+        'id' => 'pi_idem',
+        'status' => 'succeeded',
+        'amount' => 1200000,
+        'currency' => 'xof',
+    ], 200)]);
+
+    app(PaymentManager::class)->chargeSaved(savedCard(), [
+        'amount' => 12000.0,
+        'currency' => 'XOF',
+        'reference' => 'OS-IDEM-1',
+    ]);
+
+    Http::assertSent(fn ($request) => $request->hasHeader('Idempotency-Key', 'OS-IDEM-1'));
 });
 
 it('fails plainly on a declined card, without the authentication exception', function () {
