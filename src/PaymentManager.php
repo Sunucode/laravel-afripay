@@ -3,7 +3,9 @@
 namespace SunuCode\AfriPay;
 
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Log;
+use SunuCode\AfriPay\Contracts\ChargesOffSession;
 use SunuCode\AfriPay\Contracts\GatewayInterface;
 use SunuCode\AfriPay\Contracts\SettlesFromGateway;
 use SunuCode\AfriPay\Enums\TransactionStatus;
@@ -17,6 +19,7 @@ use SunuCode\AfriPay\Gateways\PayPalGateway;
 use SunuCode\AfriPay\Gateways\PayTechGateway;
 use SunuCode\AfriPay\Gateways\StripeGateway;
 use SunuCode\AfriPay\Gateways\WaveGateway;
+use SunuCode\AfriPay\Models\PaymentMethod;
 use SunuCode\AfriPay\Models\Transaction;
 
 class PaymentManager
@@ -181,6 +184,72 @@ class PaymentManager
     /**
      * Verify a webhook signature for a given gateway.
      */
+    /**
+     * Whether this gateway can charge a customer who is not there.
+     *
+     * Mobile Money cannot: every payment is authorised one by one. Ask before
+     * offering a subscription or usage billing, rather than discovering it on
+     * the first billing run.
+     */
+    public function canChargeOffSession(?string $gateway = null): bool
+    {
+        $name = $gateway ?? $this->currentGateway ?? config('afripay.default', 'wave');
+
+        return $this->gateway($name) instanceof ChargesOffSession;
+    }
+
+    /**
+     * Open the page where the customer authorises a payment method. Nothing
+     * is charged.
+     *
+     * @param  array{success_url: string, error_url: string, reference?: string, description?: string, metadata?: array}  $params
+     * @return array{redirect_url: string, reference: string}
+     */
+    public function startSavingMethod(array $params): array
+    {
+        $driver = $this->offSessionDriver();
+        $this->currentGateway = null;
+
+        return $driver->startSavingMethod($params);
+    }
+
+    /**
+     * Keep the handles from a finished authorisation. Null while it is not
+     * complete.
+     */
+    public function confirmSavedMethod(string $gatewayReference, ?Model $payable = null, ?string $gateway = null): ?PaymentMethod
+    {
+        return $this->offSessionDriver($gateway)->confirmSavedMethod($gatewayReference, $payable);
+    }
+
+    /**
+     * Charge a stored payment method, without the customer.
+     *
+     * @param  array{amount: float, currency?: string, description?: string, reference?: string, metadata?: array}  $params
+     *
+     * @throws \SunuCode\AfriPay\Exceptions\RequiresCustomerAuthentication
+     */
+    public function chargeSaved(PaymentMethod $method, array $params): Transaction
+    {
+        return $this->offSessionDriver($method->gateway)->chargeSaved($method, $params);
+    }
+
+    /**
+     * The selected gateway, refused outright when it cannot charge off
+     * session: a clear error here beats a failed billing run later.
+     */
+    protected function offSessionDriver(?string $gateway = null): ChargesOffSession
+    {
+        $name = $gateway ?? $this->currentGateway ?? config('afripay.default', 'wave');
+        $driver = $this->gateway($name);
+
+        if (! $driver instanceof ChargesOffSession) {
+            throw new \InvalidArgumentException("Gateway [{$name}] cannot charge off session.");
+        }
+
+        return $driver;
+    }
+
     public function verifyWebhookSignature(string $gateway, string $signature, string $rawBody): bool
     {
         return $this->gateway($gateway)->verifySignature($signature, $rawBody);

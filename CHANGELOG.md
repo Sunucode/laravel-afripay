@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.1.0
+
+Prélever une carte enregistrée, sans le client. Version mineure : rien ne change pour les projets qui n'en veulent pas.
+
+### Ajouté
+
+- **Contrat `ChargesOffSession`**, optionnel comme `SettlesFromGateway`, implémenté par Stripe seul. `charge()` a toujours besoin du client, puisqu'il rend une URL à ouvrir : c'est la bonne forme pour le Mobile Money, où chaque paiement s'autorise un par un. La facturation à la consommation et les abonnements ont besoin de l'inverse.
+- **`startSavingMethod()`** ouvre la même page Checkout que `charge()`, en mode `setup`. Un paramètre de différence, aucun montant : rien n'est prélevé, le client autorise seulement. Le webhook, la vérification de signature et la page de retour continuent de fonctionner tels quels.
+- **`confirmSavedMethod()`** lit l'autorisation terminée et garde les identifiants. La carte ne nous parvient jamais. Rend `null` tant que la session n'est pas finie, pour qu'une page de retour ouverte trop tôt n'enregistre rien ; la même carte autorisée deux fois met à jour une ligne au lieu d'en créer deux.
+- **`chargeSaved()`** prélève sans le client, via un PaymentIntent `off_session` et `confirm`.
+- **Table `afripay_payment_methods`**, polymorphe comme `afripay_transactions` : le moyen de paiement appartient à ce que l'application hôte facture. Aucun numéro de carte n'est stocké, seulement les deux identifiants et les quatre chiffres qu'un humain reconnaît.
+- **`RequiresCustomerAuthentication`**, exception distincte. L'authentification forte s'applique même quand c'est l'entreprise qui prélève : la banque répond `authentication_required`, et ce n'est pas un refus. Traitée comme un échec ordinaire, elle ferait relancer puis suspendre un client dont la carte n'a jamais été refusée.
+- **`PaymentMethod::hasExpired()`** : une date d'expiration se connaît à l'avance. Un client prévenu un mois avant change sa carte, un client prévenu par une coupure ne le fait pas.
+- **`PaymentManager::canChargeOffSession()`** : demander avant de proposer un abonnement, plutôt que de le découvrir au premier prélèvement.
+
+### À vérifier avant de monter
+
+- **`php artisan migrate`** crée `afripay_payment_methods`. Aucune table existante n'est touchée.
+- Les cinq autres passerelles sont inchangées. Une passerelle qui n'implémente pas le contrat est refusée explicitement par `PaymentManager`, et non en silence au moment du prélèvement.
+
 ## 2.0.0
 
 Correctifs de fiabilité des paiements. Version majeure parce que `verify()` ne modifie plus la transaction : un projet en `^1.0` ne la reçoit pas sans le vouloir. Lire « À vérifier » avant de passer en `^2.0`.
