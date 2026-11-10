@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.3
+
+### Corrigé
+
+- **La session d'enregistrement demande la création d'un client.** En `mode=setup` sans `customer`, la valeur par défaut `customer_creation=if_required` ne crée rien : Stripe ne la juge nécessaire que pour les abonnements et certains paiements. Or un prélèvement hors session exige `customer` autant que `payment_method`. La carte était donc autorisée par le client, puis perdue, et `confirmSavedMethod()` rendait `null` sans que rien n'explique pourquoi. La session passe désormais `customer_creation=always`.
+- **Un enregistrement sans client est journalisé.** Mieux vaut ne rien garder qu'une carte inutilisable qu'on croira valide au premier prélèvement.
+
 ## 2.1.2
 
 ### Corrigé

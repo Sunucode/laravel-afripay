@@ -101,6 +101,13 @@ class StripeGateway extends AbstractGateway implements ChargesOffSession, Settle
         $sessionParams = [
             'mode' => 'setup',
             'payment_method_types' => ['card'],
+            // Sans cela, rien ne garantit qu'un Customer existe a la fin :
+            // `if_required`, la valeur par defaut, ne le cree que pour les
+            // abonnements et certains paiements, jamais pour un `setup`.
+            // Or un prelevement hors session exige `customer` ET
+            // `payment_method` : sans client, la carte est autorisee puis
+            // perdue, et l'enregistrement echoue en silence.
+            'customer_creation' => 'always',
             'success_url' => $params['success_url'].(str_contains($params['success_url'], '?') ? '&' : '?').'session_id={CHECKOUT_SESSION_ID}&reference='.$reference,
             'cancel_url' => $params['error_url'],
             'client_reference_id' => $reference,
@@ -161,6 +168,14 @@ class StripeGateway extends AbstractGateway implements ChargesOffSession, Settle
         $customerId = $intent['customer'] ?? null;
 
         if (! is_string($methodId) || ! is_string($customerId)) {
+            // Un moyen de paiement sans client ne peut pas etre preleve plus
+            // tard : mieux vaut ne rien enregistrer que garder une carte
+            // inutilisable qu'on croira valide au premier prelevement.
+            Log::warning('AfriPay Stripe: setup without a customer', [
+                'session' => $gatewayReference,
+                'has_method' => is_string($methodId),
+            ]);
+
             return null;
         }
 

@@ -76,7 +76,11 @@ it('opens a setup page that charges nothing', function () {
 
     Http::assertSent(function ($request) {
         // Mode setup, et surtout aucun montant : rien ne doit être prélevé ici.
+        // `customer_creation` est indispensable : sans client, la carte est
+        // autorisée puis perdue, et un prélèvement hors session exige
+        // `customer` autant que `payment_method`.
         return $request['mode'] === 'setup'
+            && $request['customer_creation'] === 'always'
             && ! isset($request['line_items'])
             && ! collect($request->data())->keys()->contains(fn ($k) => str_contains((string) $k, 'unit_amount'));
     });
@@ -92,6 +96,20 @@ it('keeps the handles and the four digits once the card is authorised', function
         ->and($method->gateway_method_id)->toBe('pm_123')
         ->and($method->label())->toBe('visa ···· 4242')
         ->and($method->exp_year)->toBe(2030);
+});
+
+it('stores nothing when the gateway kept no customer', function () {
+    // Un moyen de paiement sans client ne peut pas etre preleve plus tard.
+    Http::fake(['api.stripe.com/v1/checkout/sessions/*' => Http::response([
+        'id' => 'cs_setup_1',
+        'setup_intent' => [
+            'id' => 'seti_1', 'status' => 'succeeded', 'customer' => null,
+            'payment_method' => ['id' => 'pm_123', 'card' => ['brand' => 'visa', 'last4' => '4242']],
+        ],
+    ])]);
+
+    expect(app(PaymentManager::class)->confirmSavedMethod('cs_setup_1', null, 'stripe'))->toBeNull()
+        ->and(PaymentMethod::count())->toBe(0);
 });
 
 it('stores nothing while the authorisation is unfinished', function () {
