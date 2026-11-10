@@ -163,3 +163,93 @@ it('knows a card the gateway will refuse before it is tried', function () {
     expect(savedCard(['gateway_method_id' => 'pm_old', 'exp_month' => 1, 'exp_year' => 2020])->hasExpired())->toBeTrue()
         ->and(savedCard(['gateway_method_id' => 'pm_new'])->hasExpired())->toBeFalse();
 });
+
+// --- Le webhook d'un prelevement hors session -----------------------------
+
+/*
+ * Un prelevement hors session produit un PaymentIntent, pas une session
+ * Checkout. Un lecteur de session rend « en attente » pour un intent : un
+ * paiement confirme apres authentification forte ne serait alors jamais
+ * regle, parce que le webhook qui l'annonce serait ignore.
+ */
+function pendingOffSession(string $reference = 'OS-1', string $intentId = 'pi_1'): \SunuCode\AfriPay\Models\Transaction
+{
+    return \SunuCode\AfriPay\Models\Transaction::create([
+        'gateway' => 'stripe',
+        'reference' => $reference,
+        'gateway_reference' => $intentId,
+        'amount' => 120.0,
+        'currency' => 'USD',
+        'status' => TransactionStatus::Pending,
+    ]);
+}
+
+it('settles an off-session charge confirmed later by webhook', function () {
+    pendingOffSession();
+
+    $transaction = app(PaymentManager::class)->handleWebhook('stripe', [
+        'type' => 'payment_intent.succeeded',
+        'data' => ['object' => [
+            'id' => 'pi_1',
+            'object' => 'payment_intent',
+            'status' => 'succeeded',
+            'amount' => 12000,
+            'amount_received' => 12000,
+            'currency' => 'usd',
+            'metadata' => ['reference' => 'OS-1'],
+        ]],
+    ]);
+
+    expect($transaction)->not->toBeNull()
+        ->and($transaction->status)->toBe(TransactionStatus::Completed);
+});
+
+it('leaves an intent awaiting the customer in pending', function () {
+    pendingOffSession('OS-2', 'pi_2');
+
+    $transaction = app(PaymentManager::class)->handleWebhook('stripe', [
+        'type' => 'payment_intent.requires_action',
+        'data' => ['object' => [
+            'id' => 'pi_2',
+            'object' => 'payment_intent',
+            'status' => 'requires_action',
+            'amount' => 12000,
+            'currency' => 'usd',
+            'metadata' => ['reference' => 'OS-2'],
+        ]],
+    ]);
+
+    // Le client peut encore confirmer : rien ne doit etre decide ici.
+    expect($transaction)->toBeNull();
+});
+
+it('fails an intent the customer never completed', function () {
+    pendingOffSession('OS-3', 'pi_3');
+
+    $transaction = app(PaymentManager::class)->handleWebhook('stripe', [
+        'type' => 'payment_intent.canceled',
+        'data' => ['object' => [
+            'id' => 'pi_3',
+            'object' => 'payment_intent',
+            'status' => 'canceled',
+            'amount' => 12000,
+            'currency' => 'usd',
+            'metadata' => ['reference' => 'OS-3'],
+        ]],
+    ]);
+
+    expect($transaction->status)->toBe(TransactionStatus::Failed);
+});
+
+it('asks the right endpoint when verifying an off-session charge', function () {
+    Http::fake(['api.stripe.com/v1/payment_intents/pi_4' => Http::response([
+        'id' => 'pi_4', 'object' => 'payment_intent', 'status' => 'succeeded',
+        'amount' => 12000, 'currency' => 'usd',
+    ])]);
+
+    // Une reference pi_ interrogee sur checkout/sessions rend 404, et la
+    // transaction resterait en attente pour toujours.
+    app(PaymentManager::class)->verify(pendingOffSession('OS-4', 'pi_4'));
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), '/payment_intents/pi_4'));
+});

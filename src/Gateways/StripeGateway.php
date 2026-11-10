@@ -270,8 +270,15 @@ class StripeGateway extends AbstractGateway implements ChargesOffSession, Settle
             return null;
         }
 
+        // La reference pointe soit une session Checkout, soit un PaymentIntent
+        // pour un prelevement hors session. Interroger le mauvais endpoint rend
+        // 404, et la transaction resterait en attente pour toujours.
+        $endpoint = str_starts_with($transaction->gateway_reference, 'pi_')
+            ? 'payment_intents'
+            : 'checkout/sessions';
+
         $response = Http::withToken($this->config['secret'])
-            ->get("https://api.stripe.com/v1/checkout/sessions/{$transaction->gateway_reference}");
+            ->get("https://api.stripe.com/v1/{$endpoint}/{$transaction->gateway_reference}");
 
         return $response->successful() ? $this->readSession($response->json()) : null;
     }
@@ -279,21 +286,43 @@ class StripeGateway extends AbstractGateway implements ChargesOffSession, Settle
     /**
      * @return array{status: TransactionStatus, amount: ?float, currency: ?string, data: array}
      */
-    private function readSession(array $session): array
+    /**
+     * Read a Stripe object, whichever kind it is.
+     *
+     * Two shapes reach this method. A Checkout Session says `payment_status`
+     * and `amount_total`; a PaymentIntent says `status` and `amount`. Off-session
+     * charges produce the second, and a session reader returns « pending » for
+     * it: a payment confirmed after strong authentication would then never be
+     * settled, because the webhook that announces it would be ignored.
+     */
+    private function readSession(array $object): array
     {
-        $currency = $session['currency'] ?? null;
+        $currency = $object['currency'] ?? null;
+        $estIntent = ($object['object'] ?? null) === 'payment_intent' || str_starts_with((string) ($object['id'] ?? ''), 'pi_');
+
+        $montant = match (true) {
+            isset($object['amount_total']) => (int) $object['amount_total'],
+            $estIntent && isset($object['amount_received']) && (int) $object['amount_received'] > 0 => (int) $object['amount_received'],
+            $estIntent && isset($object['amount']) => (int) $object['amount'],
+            default => null,
+        };
 
         return [
             'status' => match (true) {
-                ($session['payment_status'] ?? null) === 'paid' => TransactionStatus::Completed,
-                ($session['status'] ?? null) === 'expired' => TransactionStatus::Failed,
+                ($object['payment_status'] ?? null) === 'paid' => TransactionStatus::Completed,
+                $estIntent && ($object['status'] ?? null) === 'succeeded' => TransactionStatus::Completed,
+                // `requires_action` reste en attente : le client peut encore
+                // confirmer. `canceled` et `requires_payment_method` sont des
+                // fins de partie.
+                $estIntent && in_array($object['status'] ?? null, ['canceled', 'requires_payment_method'], true) => TransactionStatus::Failed,
+                ($object['status'] ?? null) === 'expired' => TransactionStatus::Failed,
                 default => TransactionStatus::Pending,
             },
-            'amount' => isset($session['amount_total']) && $currency !== null
-                ? AmountConverter::fromStripeAmount((int) $session['amount_total'], $currency)
+            'amount' => $montant !== null && $currency !== null
+                ? AmountConverter::fromStripeAmount($montant, $currency)
                 : null,
             'currency' => $currency,
-            'data' => $session,
+            'data' => $object,
         ];
     }
 

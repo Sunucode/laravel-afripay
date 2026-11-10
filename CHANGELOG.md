@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.2
+
+### Corrigé
+
+- **Stripe comprend les PaymentIntent, pas seulement les sessions Checkout.** Un prélèvement hors session produit un PaymentIntent, qui dit `status` et `amount` là où une session dit `payment_status` et `amount_total`. Le lecteur ne connaissait que la session et rendait « en attente » pour un intent : un paiement confirmé après authentification forte n'était jamais réglé, parce que le webhook qui l'annonce était ignoré. Un intent en `requires_action` reste en attente, le client pouvant encore confirmer ; `canceled` et `requires_payment_method` le font échouer.
+- **`verify()` interroge le bon endpoint.** Une référence `pi_` était cherchée sur `checkout/sessions`, qui rend 404 : la transaction restait en attente pour toujours.
+
 ## 2.1.1
 
 ### Corrigé
