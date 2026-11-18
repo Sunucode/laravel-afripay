@@ -11,6 +11,10 @@ Bictorys, en page hébergée. Version mineure : rien ne change pour les projets 
 - **Route `POST {webhook_path}/bictorys`** et sa méthode sur le contrôleur, comme les six autres. `GatewayInterface` n'a pas bougé : les deux en-têtes de Bictorys sont ramenés à une seule chaîne, au format `t=...,v1=...` déjà utilisé pour Wave.
 - **Cas `Gateway::Bictorys`** dans l'enum, avec son libellé et ses pays.
 
+### Corrigé
+
+- **Un réglage `enabled` écrit « 1 » était lu de deux façons.** Les routes de webhook l'interprètent avec `filter_var` depuis toujours, `isEnabled()` et `enabledGateways()` le comparaient strictement à `true`. Un `AFRIPAY_WAVE_ENABLED=1` dans un `.env`, ou un `<env value="true"/>` de PHPUnit, qui vaut « 1 », enregistrait donc la route du webhook et faisait quand même échouer `charge()` en annonçant une passerelle désactivée. Les trois endroits lisent maintenant la même chose. Les valeurs déjà acceptées le restent à l'identique : seuls « 1 », « on » et « yes » cessent d'être lus comme un refus.
+
 ### Ce qui n'est pas couvert
 
 - **L'API directe par opérateur** (`?payment_type=`). Elle rend un QR code pour Wave sur ordinateur, un message USSD à afficher, et réclame un code OTP pour Orange Money Côte d'Ivoire, là où `charge()` ne sait rendre qu'une URL. La couvrir demanderait un contrat supplémentaire, comme `ChargesOffSession` l'a été pour les prélèvements.

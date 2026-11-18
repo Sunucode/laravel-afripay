@@ -351,7 +351,7 @@ class PaymentManager
     public function enabledGateways(): array
     {
         return collect(config('afripay.gateways', []))
-            ->filter(fn (array $config) => ($config['enabled'] ?? true) === true)
+            ->filter(fn (array $config) => static::isTruthy($config['enabled'] ?? true))
             ->keys()
             ->all();
     }
@@ -361,7 +361,22 @@ class PaymentManager
      */
     public function isEnabled(string $gateway): bool
     {
-        return config("afripay.gateways.{$gateway}.enabled", true) === true;
+        return static::isTruthy(config("afripay.gateways.{$gateway}.enabled", true));
+    }
+
+    /**
+     * Le drapeau `enabled` vient d'un `.env`, donc il arrive en booléen, mais
+     * aussi en « 1 », « true », « on » ou « yes » selon la façon de l'écrire.
+     *
+     * Il se lit désormais comme les routes de webhook le lisaient déjà
+     * (`filter_var`). Avec une comparaison stricte à `true`, un
+     * `AFRIPAY_WAVE_ENABLED=1` enregistrait la route du webhook et faisait
+     * pourtant échouer `charge()` en annonçant une passerelle désactivée :
+     * deux lectures du même réglage, deux réponses.
+     */
+    protected static function isTruthy(mixed $value): bool
+    {
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 
     /**

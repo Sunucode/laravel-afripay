@@ -66,3 +66,24 @@ test('available gateways returns configured gateways', function () {
         ->and($gateways)->toContain('paydunya')
         ->and($gateways)->toContain('paytech');
 });
+
+/*
+ * Le drapeau `enabled` arrive d'un .env : il peut valoir « 1 » comme `true`.
+ * Les routes de webhook l'ont toujours lu avec filter_var ; `isEnabled()` le
+ * comparait à `true` et répondait non pour « 1 ».
+ */
+it('lit enabled de la meme facon quelle que soit son ecriture', function () {
+    $manager = app(PaymentManager::class);
+
+    foreach ([true, '1', 'true', 'on', 'yes'] as $actif) {
+        config(['afripay.gateways.wave.enabled' => $actif]);
+        expect($manager->isEnabled('wave'))->toBeTrue()
+            ->and($manager->enabledGateways())->toContain('wave');
+    }
+
+    foreach ([false, '0', 'false', 'off', 'no', ''] as $inactif) {
+        config(['afripay.gateways.wave.enabled' => $inactif]);
+        expect($manager->isEnabled('wave'))->toBeFalse()
+            ->and($manager->enabledGateways())->not->toContain('wave');
+    }
+});
