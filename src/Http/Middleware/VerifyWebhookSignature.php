@@ -4,6 +4,7 @@ namespace SunuCode\AfriPay\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use SunuCode\AfriPay\Gateways\BictorysGateway;
 use SunuCode\AfriPay\PaymentManager;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -40,6 +41,7 @@ class VerifyWebhookSignature
             'wave' => $request->header('Wave-Signature', ''),
             'stripe' => $request->header('Stripe-Signature', ''),
             'paydunya' => $request->input('data.hash') ?? $request->input('master_key') ?? '',
+            'bictorys' => BictorysGateway::signatureFrom($request),
             default => '',
         };
     }

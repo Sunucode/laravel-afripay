@@ -13,6 +13,7 @@ use SunuCode\AfriPay\Events\PaymentCompleted;
 use SunuCode\AfriPay\Events\PaymentFailed;
 use SunuCode\AfriPay\Events\PaymentInitiated;
 use SunuCode\AfriPay\Events\PaymentRefunded;
+use SunuCode\AfriPay\Gateways\BictorysGateway;
 use SunuCode\AfriPay\Gateways\OrangeMoneyGateway;
 use SunuCode\AfriPay\Gateways\PayDunyaGateway;
 use SunuCode\AfriPay\Gateways\PayPalGateway;
@@ -392,6 +393,7 @@ class PaymentManager
             'orange_money' => new OrangeMoneyGateway($config),
             'paypal' => new PayPalGateway($config),
             'paytech' => new PayTechGateway($config),
+            'bictorys' => new BictorysGateway($config),
             default => throw new \InvalidArgumentException("Gateway [{$name}] is not supported. Use AfriPay::extend() to register custom gateways."),
         };
     }

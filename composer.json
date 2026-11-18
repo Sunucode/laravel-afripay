@@ -1,7 +1,7 @@
 {
     "name": "sunucode/afripay",
-    "description": "Unified payment gateway for Africa — Wave, Orange Money, PayDunya, PayTech, Stripe & PayPal for Laravel",
-    "keywords": ["laravel", "payment", "wave", "orange-money", "paydunya", "paytech", "stripe", "paypal", "africa", "mobile-money", "xof", "fcfa"],
+    "description": "Unified payment gateway for Africa — Wave, Orange Money, PayDunya, PayTech, Bictorys, Stripe & PayPal for Laravel",
+    "keywords": ["laravel", "payment", "wave", "orange-money", "paydunya", "paytech", "bictorys", "stripe", "paypal", "africa", "mobile-money", "xof", "fcfa"],
     "license": "MIT",
     "authors": [
         {

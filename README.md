@@ -1,6 +1,6 @@
 # AfriPay - Unified Payment Gateway for Africa
 
-**Accept payments from Wave, Orange Money, PayDunya, PayTech, Stripe & PayPal in your Laravel app with a single, clean API.**
+**Accept payments from Wave, Orange Money, PayDunya, PayTech, Bictorys, Stripe & PayPal in your Laravel app with a single, clean API.**
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/sunucode/afripay.svg)](https://packagist.org/packages/sunucode/afripay)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -51,6 +51,7 @@ AfriPay::via('orange_money')->charge([...]);
 | **Orange Money** | SN, CI, ML, BF, CM, GN | Mobile Money | Beta |
 | **PayDunya** | SN, CI, BJ, TG, BF, ML | Multi-canal | Production |
 | **PayTech** | SN | Multi-canal | Production |
+| **Bictorys** | SN, CI (autres selon le compte) | Multi-canal | Production |
 | **Stripe** | Global | Carte bancaire | Production |
 | **PayPal** | Global | International | Production |
 
@@ -152,6 +153,13 @@ PAYPAL_MODE=sandbox
 PAYTECH_API_KEY=...
 PAYTECH_API_SECRET=...
 PAYTECH_ENV=test
+
+# Bictorys — livré désactivé, rien n'apparaît tant qu'il n'est pas activé
+AFRIPAY_BICTORYS_ENABLED=true
+BICTORYS_API_KEY=public-...
+BICTORYS_WEBHOOK_SECRET=...
+BICTORYS_API_URL=https://api.test.bictorys.com
+BICTORYS_COUNTRY=SN
 ```
 
 ### Utilisation
@@ -376,12 +384,13 @@ POST /afripay/webhooks/paydunya
 POST /afripay/webhooks/orange-money
 POST /afripay/webhooks/paytech
 POST /afripay/webhooks/paypal
+POST /afripay/webhooks/bictorys
 ```
 
 Le chemin est configurable via `AFRIPAY_WEBHOOK_PATH`. Seules les passerelles activées (`AFRIPAY_*_ENABLED`) ont leur route.
 
 **Chaque webhook :**
-- Vérifie la signature (HMAC-SHA256 pour Wave/Stripe/PayTech, master_key pour PayDunya)
+- Vérifie la signature (HMAC-SHA256 pour Wave/Stripe/PayTech, master_key pour PayDunya, HMAC ou clé statique pour Bictorys)
 - PayDunya et Orange Money : relit le statut et le montant auprès de l'API, jamais depuis la notification
 - Vérifie le montant (tolérance +/- 1 unité) et la devise : un écart fait échouer le paiement
 - Utilise `lockForUpdate()` : une transaction ne quitte « en attente » qu'une fois

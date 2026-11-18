@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Log;
+use SunuCode\AfriPay\Gateways\BictorysGateway;
 use SunuCode\AfriPay\PaymentManager;
 
 class WebhookController extends Controller
@@ -105,6 +106,28 @@ class WebhookController extends Controller
 
         // PayTech signature is verified inside the gateway handler
         $transaction = $this->manager->handleWebhook('paytech', $request->all());
+
+        return response()->json([
+            'status' => $transaction ? 'ok' : 'ignored',
+        ]);
+    }
+
+    /**
+     * Bictorys réessaie trois fois tant qu'il ne reçoit pas 200. Une signature
+     * invalide reste refusée en 403 : rejouer une requête forgée ne doit rien
+     * obtenir. Tout le reste répond 200, même ce qu'on ignore.
+     */
+    public function bictorys(Request $request): JsonResponse
+    {
+        Log::info('AfriPay: Bictorys webhook received');
+
+        if (! $this->manager->verifyWebhookSignature('bictorys', BictorysGateway::signatureFrom($request), $request->getContent())) {
+            Log::warning('AfriPay: Bictorys signature verification failed');
+
+            return response()->json(['error' => 'Invalid signature'], 403);
+        }
+
+        $transaction = $this->manager->handleWebhook('bictorys', $request->all());
 
         return response()->json([
             'status' => $transaction ? 'ok' : 'ignored',

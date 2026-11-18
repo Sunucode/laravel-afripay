@@ -41,6 +41,16 @@ abstract class TestCase extends BaseTestCase
             'mode' => 'test',
         ]);
 
+        // `enabled` est explicite : la passerelle est livrée désactivée, et
+        // sans cela sa route de webhook ne serait pas enregistrée ici.
+        $app['config']->set('afripay.gateways.bictorys', [
+            'enabled' => true,
+            'api_key' => 'test_public_key',
+            'webhook_secret' => 'test_bictorys_secret',
+            'base_url' => 'https://api.test.bictorys.com',
+            'country' => 'SN',
+        ]);
+
         $app['config']->set('afripay.gateways.paytech', [
             'api_key' => 'test_api_key',
             'api_secret' => 'test_api_secret',

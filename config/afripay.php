@@ -201,6 +201,36 @@ return [
             'env' => env('PAYTECH_ENV', 'test'), // test or prod
         ],
 
+        /*
+        |----------------------------------------------------------------------
+        | Bictorys (Senegal, Ivory Coast, and the rest of the UEMOA)
+        |----------------------------------------------------------------------
+        | Hosted checkout page: Wave, Orange Money, MTN, Maxit and card behind
+        | a single redirect. Their direct per-operator API (QR code, USSD
+        | message, Orange Money CI OTP) is NOT covered, and neither are
+        | payouts: their private key has no place here.
+        |
+        | DISABLED by default on purpose. A host project that lists
+        | AfriPay::enabledGateways() in its checkout screen would otherwise
+        | show a Bictorys button, with no credentials behind it, on the very
+        | next composer update.
+        |
+        | Minimum charge: 100 XOF. Their test and production webhooks are
+        | configured separately in their dashboard.
+        | Docs: https://docs.bictorys.com/docs/integration
+        */
+        'bictorys' => [
+            'enabled' => env('AFRIPAY_BICTORYS_ENABLED', false),
+            // Public key (X-Api-Key): charges and status reads.
+            'api_key' => env('BICTORYS_API_KEY'),
+            // Webhook secret, a third key: neither the public nor the private one.
+            'webhook_secret' => env('BICTORYS_WEBHOOK_SECRET'),
+            'base_url' => env('BICTORYS_API_URL', 'https://api.bictorys.com'),
+            // Bictorys country code, not always the ISO one (their table reads
+            // « BK » for Burkina Faso where their own snippet reads « BF »).
+            'country' => env('BICTORYS_COUNTRY', 'SN'),
+        ],
+
     ],
 
 ];

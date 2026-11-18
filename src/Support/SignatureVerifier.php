@@ -100,6 +100,42 @@ class SignatureVerifier
     }
 
     /**
+     * Vérifie un webhook Bictorys.
+     *
+     * Deux formes, les deux documentées par Bictorys : un HMAC-SHA256 calculé
+     * sur « {horodatage}.{corps} », que l'appelant ramène au format
+     * « t=...,v1=... » déjà utilisé ici pour Wave et Stripe, ou à défaut la
+     * clé statique envoyée dans l'en-tête `X-Secret-Key`.
+     *
+     * Leur horodatage est en millisecondes là où Stripe compte en secondes :
+     * lu comme des secondes, il situerait le message dans quelques millénaires
+     * et toute signature valide serait rejetée.
+     */
+    public static function verifyBictorysSignature(string $signature, string $rawBody, string $secret, int $toleranceSeconds = 300): bool
+    {
+        if ($secret === '' || $signature === '') {
+            return false;
+        }
+
+        if (preg_match('/^t=(\\d+),v1=([a-f0-9]+)$/i', trim($signature), $parts) !== 1) {
+            // Clé statique : comparaison à temps constant, jamais `===`.
+            return hash_equals($secret, $signature);
+        }
+
+        [, $timestamp, $received] = $parts;
+
+        $millisecondes = (int) $timestamp;
+        $secondes = $millisecondes >= 1_000_000_000_000 ? intdiv($millisecondes, 1000) : $millisecondes;
+
+        if (abs(time() - $secondes) > $toleranceSeconds) {
+            return false;
+        }
+
+        // Le HMAC porte l'horodatage tel qu'il a été envoyé, pas sa conversion.
+        return hash_equals(hash_hmac('sha256', $timestamp.'.'.$rawBody, $secret), $received);
+    }
+
+    /**
      * Build a Wave-style signed header for outbound API requests.
      */
     public static function buildWaveSignature(string $jsonBody, string $secret): string

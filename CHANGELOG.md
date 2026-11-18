@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.2.0
+
+Bictorys, en page hébergée. Version mineure : rien ne change pour les projets qui ne l'activent pas.
+
+### Ajouté
+
+- **Passerelle `bictorys`** (Sénégal, Côte d'Ivoire, le reste de l'UEMOA selon ce que le compte a d'activé). Un POST ouvre la page de paiement Bictorys, où le client choisit Wave, Orange Money, MTN, Maxit ou la carte. Même forme que PayTech : une URL à ouvrir, un webhook qui règle. Elle implémente `SettlesFromGateway`.
+- **`SignatureVerifier::verifyBictorysSignature()`**, qui accepte les deux formes documentées par Bictorys : le HMAC-SHA256 sur « {horodatage}.{corps} », et à défaut la clé statique de l'en-tête `X-Secret-Key`, comparée à temps constant. Leur horodatage est en millisecondes là où Stripe compte en secondes : lu comme des secondes, il situerait chaque message dans quelques millénaires et toute signature valide serait rejetée.
+- **Route `POST {webhook_path}/bictorys`** et sa méthode sur le contrôleur, comme les six autres. `GatewayInterface` n'a pas bougé : les deux en-têtes de Bictorys sont ramenés à une seule chaîne, au format `t=...,v1=...` déjà utilisé pour Wave.
+- **Cas `Gateway::Bictorys`** dans l'enum, avec son libellé et ses pays.
+
+### Ce qui n'est pas couvert
+
+- **L'API directe par opérateur** (`?payment_type=`). Elle rend un QR code pour Wave sur ordinateur, un message USSD à afficher, et réclame un code OTP pour Orange Money Côte d'Ivoire, là où `charge()` ne sait rendre qu'une URL. La couvrir demanderait un contrat supplémentaire, comme `ChargesOffSession` l'a été pour les prélèvements.
+- **Les retraits (payouts).** Le package n'a aucune notion de retrait : leur clé privée n'a donc pas sa place dans sa configuration.
+- **Le prélèvement hors session.** `canChargeOffSession('bictorys')` répond `false`, comme pour tout le Mobile Money.
+- **Le remboursement automatique.** Un webhook `reversed` sur une transaction déjà réglée est journalisé en avertissement, jamais transformé en remboursement : c'est une décision métier, et `PaymentManager::refund()` reste là pour la prononcer.
+
+### À vérifier avant de monter
+
+- **La passerelle arrive désactivée** (`AFRIPAY_BICTORYS_ENABLED=false`). C'est voulu : un projet qui alimente son écran de paiement avec `AfriPay::enabledGateways()` afficherait sinon un bouton Bictorys sans identifiants derrière, dès le `composer update`. Rien n'apparaît tant que vous ne l'activez pas, et sans activation la route de webhook n'existe même pas.
+- **Aucune migration, aucune table touchée** : `gateway` est un `string(30)`, « bictorys » y tient.
+- **Les six autres passerelles sont inchangées.** Les 86 tests existants passent sans une modification.
+- Trois réglages suffisent : `BICTORYS_API_KEY` (leur clé publique), `BICTORYS_WEBHOOK_SECRET` (un troisième secret, ni la publique ni la privée) et `BICTORYS_COUNTRY`. Chez Bictorys, les webhooks de test et de production se configurent séparément : les deux environnements se règlent dans leur tableau de bord, sinon la notification n'arrive jamais.
+- **Le montant part en entier**, leur minimum est de 100 FCFA.
+
 ## 2.1.3
 
 ### Corrigé

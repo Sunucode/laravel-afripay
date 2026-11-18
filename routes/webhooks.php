@@ -14,6 +14,7 @@ $routes = [
     'orange_money' => ['orange-money', 'orangeMoney'],
     'paytech' => ['paytech', 'paytech'],
     'paypal' => ['paypal', 'paypal'],
+    'bictorys' => ['bictorys', 'bictorys'],
 ];
 
 Route::middleware('throttle:60,1')
