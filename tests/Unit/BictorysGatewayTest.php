@@ -243,3 +243,40 @@ it('ramene les en-tetes Bictorys a une seule chaine de signature', function () {
 it('ne peut pas prelever hors session', function () {
     expect(app(PaymentManager::class)->canChargeOffSession('bictorys'))->toBeFalse();
 });
+
+/*
+ * Leur documentation annonce `transactionId` et `redirectUrl`. Leur API rend
+ * `chargeId` et `link`, en 202. Relevé sur leur sandbox le 18/11/2026.
+ */
+it('accepte la reponse reelle de Bictorys, differente de sa documentation', function () {
+    Http::fake(['api.test.bictorys.com/pay/v1/charges' => Http::response([
+        'type' => 'CheckoutLinkObject',
+        'link' => 'https://pay.test.bictorys.com/payment/v1/checkout?charge_id=0625f259&op_token=07Ac',
+        'chargeId' => '0625f259-aab8-4146-8a5b-082f4169ad67',
+        'opToken' => '07Ac5Me5BgZ0hZXgizuICSNJRD88yLvm',
+    ], 202)]);
+
+    $resultat = app(PaymentManager::class)->via('bictorys')->charge([
+        'amount' => 1499,
+        'success_url' => 'https://exemple.test/ok',
+        'error_url' => 'https://exemple.test/ko',
+    ]);
+
+    expect($resultat['redirect_url'])->toBe('https://pay.test.bictorys.com/payment/v1/checkout?charge_id=0625f259&op_token=07Ac')
+        // Sans cet identifiant, plus aucune vérification de statut n'est possible.
+        ->and($resultat['transaction']->gateway_reference)->toBe('0625f259-aab8-4146-8a5b-082f4169ad67');
+});
+
+it('n invente pas d identifiant quand la reponse n en porte aucun', function () {
+    Http::fake(['api.test.bictorys.com/pay/v1/charges' => Http::response([
+        'link' => 'https://pay.test.bictorys.com/payment/v1/checkout?charge_id=x',
+    ], 202)]);
+
+    $transaction = app(PaymentManager::class)->via('bictorys')->charge([
+        'amount' => 1000,
+        'success_url' => 'https://exemple.test/ok',
+        'error_url' => 'https://exemple.test/ko',
+    ])['transaction'];
+
+    expect($transaction->gateway_reference)->toBeNull();
+});

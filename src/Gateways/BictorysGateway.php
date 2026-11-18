@@ -82,11 +82,14 @@ class BictorysGateway extends AbstractGateway implements SettlesFromGateway
             'currency' => $currency,
         ]));
 
-        // Le `transactionId` est la seule clé qui ouvre leur endpoint de
-        // statut : sans lui gardé ici, une transaction en attente ne peut plus
-        // être vérifiée.
+        // L'identifiant qui ouvre leur endpoint de statut. Leur
+        // documentation annonce `transactionId` ; leur API rend `chargeId`
+        // (relevé sur le sandbox le 18/11/2026, réponse 202 :
+        // type, link, chargeId, opToken). Les deux sont lus, dans cet ordre,
+        // pour survivre au jour où ils aligneront l'un sur l'autre. Sans cet
+        // identifiant, une transaction en attente ne peut plus être vérifiée.
         $transaction->update([
-            'gateway_reference' => is_string($data['transactionId'] ?? null) ? $data['transactionId'] : null,
+            'gateway_reference' => $this->identifiant($data),
             'gateway_response' => $this->withoutQrCode($data),
         ]);
 
@@ -140,9 +143,11 @@ class BictorysGateway extends AbstractGateway implements SettlesFromGateway
     /**
      * Statut lu à la demande, sans rien enregistrer.
      *
-     * L'adresse est celle des transactions, pas celle des charges : leur
-     * documentation prévient que `GET /pay/v1/charges/{id}` n'existe pas et
-     * répond toujours en erreur.
+     * L'adresse est celle des transactions, pas celle des charges, et elle
+     * attend le `chargeId` : vérifié sur leur sandbox, `/pay/v1/charges/{id}/status`
+     * répond 404 et `/pay/v1/transactions/{id}` sans suffixe répond 403.
+     *
+     * Elle ne rend que deux champs, `id` et `status`, jamais le montant.
      */
     protected function fetchStatus(Transaction $transaction): ?array
     {
@@ -171,9 +176,12 @@ class BictorysGateway extends AbstractGateway implements SettlesFromGateway
     /**
      * Régler depuis la page de retour demande le montant payé : sans lui, le
      * contrôle anti-fraude d'`AbstractGateway` refuse le règlement et fait
-     * échouer une transaction pourtant payée. Leur documentation ne dit pas si
-     * l'endpoint de statut rend le montant ; quand il ne le donne pas, on
-     * laisse le webhook, qui le porte toujours, faire le travail.
+     * échouer une transaction pourtant payée.
+     *
+     * Or leur endpoint de statut ne rend pas le montant (relevé sur leur
+     * sandbox le 18/11/2026 : `{id, status}`, rien d'autre). Un paiement
+     * réussi est donc toujours laissé au webhook, qui porte le montant. Seuls
+     * les échecs se règlent ici, et le contrôle ne s'applique pas à eux.
      */
     public function settle(Transaction $transaction): ?Transaction
     {
@@ -303,6 +311,20 @@ class BictorysGateway extends AbstractGateway implements SettlesFromGateway
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function identifiant(array $data): ?string
+    {
+        foreach (['transactionId', 'chargeId'] as $champ) {
+            if (is_string($data[$champ] ?? null) && $data[$champ] !== '') {
+                return $data[$champ];
+            }
+        }
+
+        return null;
+    }
+
     private function withoutQrCode(array $data): array
     {
         unset($data['qrCode']);

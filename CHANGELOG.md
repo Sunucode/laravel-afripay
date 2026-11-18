@@ -11,6 +11,22 @@ Bictorys, en page hébergée. Version mineure : rien ne change pour les projets 
 - **Route `POST {webhook_path}/bictorys`** et sa méthode sur le contrôleur, comme les six autres. `GatewayInterface` n'a pas bougé : les deux en-têtes de Bictorys sont ramenés à une seule chaîne, au format `t=...,v1=...` déjà utilisé pour Wave.
 - **Cas `Gateway::Bictorys`** dans l'enum, avec son libellé et ses pays.
 
+### Relevé sur leur sandbox, contre leur documentation
+
+Leur guide d'intégration décrit une réponse de création qui n'est pas celle que
+rend leur API. Vérifié le 18 novembre 2026 :
+
+- La création répond **202**, pas 201, et rend `{type, link, chargeId, opToken}`.
+  Ni `transactionId` ni `redirectUrl`, que leur documentation annonce. La
+  passerelle lit donc `redirectUrl` puis `link`, et `transactionId` puis
+  `chargeId`, pour marcher dans les deux cas.
+- L'endpoint de statut s'ouvre bien avec cet identifiant de charge, mais ne rend
+  que `{id, status}` : **jamais le montant**. Une page de retour ne peut donc pas
+  régler un paiement réussi sans renoncer au contrôle du montant. Elle ne le
+  fait pas : c'est le webhook qui règle, lui seul porte le montant.
+- `/pay/v1/charges/{id}/status` répond 404 et `/pay/v1/transactions/{id}` sans
+  suffixe répond 403.
+
 ### Corrigé
 
 - **Un réglage `enabled` écrit « 1 » était lu de deux façons.** Les routes de webhook l'interprètent avec `filter_var` depuis toujours, `isEnabled()` et `enabledGateways()` le comparaient strictement à `true`. Un `AFRIPAY_WAVE_ENABLED=1` dans un `.env`, ou un `<env value="true"/>` de PHPUnit, qui vaut « 1 », enregistrait donc la route du webhook et faisait quand même échouer `charge()` en annonçant une passerelle désactivée. Les trois endroits lisent maintenant la même chose. Les valeurs déjà acceptées le restent à l'identique : seuls « 1 », « on » et « yes » cessent d'être lus comme un refus.
